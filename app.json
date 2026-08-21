@@ -1,0 +1,87 @@
+{
+  "expo": {
+    "name": "Brand Gallery Shopping",
+    "slug": "user-app",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/images/app-icon.jpeg",
+    "scheme": "userapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "versionCode": 3,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/app-icon.jpeg",
+        "backgroundColor": "#FFFFFF"
+      },
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.slliman.userapp",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "edgeToEdgeEnabled": true,
+    "predictiveBackGestureEnabled": false,
+    "usesCleartextTraffic": true,
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/app-icon.jpeg"
+    },
+    "plugins": [
+      "expo-updates",
+      [
+        "expo-location",
+        {
+          "locationAlwaysPermission": "Allow Brand Gallery to access your location for delivery."
+        }
+      ],
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-image.jpg",
+          "resizeMode": "cover",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "image": "./assets/images/splash-image.jpg",
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-sqlite",
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "production"
+        }
+      ]
+    ],
+    "extra": {
+      "oneSignalAppId": "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d",
+      "router": {},
+      "eas": {
+        "projectId": "074c6e26-27f5-4c47-b086-5ee0955bd13b"
+      }
+    },
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/074c6e26-27f5-4c47-b086-5ee0955bd13b"
+    },
+    "owner": "shah-suliman"
+  }
+}
