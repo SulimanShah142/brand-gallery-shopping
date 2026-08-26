@@ -2470,37 +2470,28 @@ product.availableColors.length > 0 ? (
 
                         {/* MEASUREMENT HEADERS */}
 
-                        {measurementKeys.map(
-                          (
-                            key: string
-                          ) => (
-                            <View
-                              key={`header-${key}`}
+                        {measurementKeys.map((key: string) => (
+                          <View
+                            key={`header-${key}`}
+                            style={{
+                              width: 120,
+                              paddingVertical: 13,
+                              paddingHorizontal: 8,
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Text
                               style={{
-                                width: 120,
-                                paddingVertical: 13,
-                                paddingHorizontal: 8,
-                                justifyContent:
-                                  "center",
+                                fontSize: 11,
+                                fontWeight: "800",
+                                color: "#111111",
+                                textAlign: "center",
                               }}
                             >
-                              <Text
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: "800",
-                                  color:
-                                    "#111111",
-                                  textAlign:
-                                    "center",
-                                }}
-                              >
-                                {String(
-                                  key
-                                ).toUpperCase()}
-                              </Text>
-                            </View>
-                          )
-                        )}
+                              {String(key).toUpperCase()}
+                            </Text>
+                          </View>
+                        ))}
                       </View>
 
                       {/* DATA ROWS */}

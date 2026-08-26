@@ -1,4 +1,3 @@
-
 {
   "expo": {
     "name": "Brand Gallery Shopping",
@@ -9,6 +8,23 @@
     "icon": "./assets/images/app-icon.jpeg",
 
     "scheme": "userapp",
+
+    "linking": {
+      "prefixes": [
+        "https://brand-gallery-deep-linking.vercel.app/"
+      ],
+      "config": {
+        "screens": {
+          "(shop)": {
+            "screens": {
+              "product/[id]": "product/:id",
+              "products": "products",
+              "orders/[id]": "orders/:id"
+            }
+          }
+        }
+      }
+    },
 
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -55,6 +71,11 @@
               "scheme": "https",
               "host": "brand-gallery-deep-linking.vercel.app",
               "pathPrefix": "/product"
+            },
+            {
+              "scheme": "https",
+              "host": "brand-gallery-deep-linking.vercel.app",
+              "pathPrefix": "/products"
             }
           ]
         }

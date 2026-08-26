@@ -24,12 +24,15 @@ export default function LocationPermissionModal({
   visible,
   loading = false,
   title = 'ENABLE LIVE LOCATION',
-  subtitle = 'We use your live location to power real-time tracking.',
+  subtitle,
+  description,
   confirmText = 'ALLOW LOCATION',
   cancelText = 'NOT NOW',
   onAllow,
   onCancel,
 }: LocationPermissionModalProps) {
+  const resolvedSubtitle = subtitle ?? description ?? 'We use your live location to power real-time tracking.';
+
   return (
     <Modal
       visible={visible}
@@ -52,7 +55,7 @@ export default function LocationPermissionModal({
           <Text style={styles.title}>{title}</Text>
 
           {/* SUBTITLE */}
-          <Text style={styles.subtitle}>{subtitle}</Text>
+          <Text style={styles.subtitle}>{resolvedSubtitle}</Text>
 
           {/* FEATURES */}
           <View style={styles.featuresWrap}>

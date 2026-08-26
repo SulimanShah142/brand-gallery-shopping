@@ -1090,6 +1090,7 @@ const isFreeDelivery =
         role="USER"
         destinationCoords={coords}
         warehouseCoords={warehouse}
+        driverCoords={null}
         orderStatus="confirmed"
         orderId="checkout-preview"
       />
