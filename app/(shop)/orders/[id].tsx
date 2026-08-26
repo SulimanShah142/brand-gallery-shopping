@@ -146,6 +146,49 @@ case 'refunded':
   }
 };
 
+const ORDER_TIMELINE_STAGES = [
+  {
+    key: 'pending',
+    label: 'pending',
+    icon: 'time-outline',
+  },
+  {
+    key: 'confirmed',
+    label: 'confirmed',
+    icon: 'checkmark-circle-outline',
+  },
+  {
+    key: 'awaiting_packaging',
+    label: 'awaiting_packaging',
+    icon: 'cube-outline',
+  },
+  {
+    key: 'packaging',
+    label: 'packaging',
+    icon: 'layers-outline',
+  },
+  {
+    key: 'packaged',
+    label: 'packaged',
+    icon: 'cube',
+  },
+  {
+    key: 'assigned_to_deliverer',
+    label: 'assigned_to_deliverer',
+    icon: 'person-outline',
+  },
+  {
+    key: 'picked_up',
+    label: 'picked_up',
+    icon: 'bicycle-outline',
+  },
+  {
+    key: 'delivered',
+    label: 'delivered',
+    icon: 'checkmark-done-outline',
+  },
+] as const;
+
 
 export default function UserOrderDetails() {
   const { id } = useLocalSearchParams();
@@ -656,6 +699,14 @@ const isOrderActivelyInTransit =
 
 const currentStatusString = normalizeStatus(order?.status);
 
+const safeTimelineIndex = useMemo(() => {
+  const index = ORDER_TIMELINE_STAGES.findIndex(
+    (stage) => stage.key === currentStatusString
+  );
+
+  return index >= 0 ? index : 0;
+}, [currentStatusString]);
+
 const refundReasonText =
   order?.refundReason || null;
 
@@ -729,194 +780,300 @@ const visibleItems = itemsExpanded
           >
 
            
-         <View style={styles.section}>
-              <Text style={[styles.sectionLabel, isRTL && { textAlign: 'right' }]}>
-                {(t('orderStatus') || 'ORDER STATUS').toUpperCase()}
-              </Text>
+    {/* ========================================================== */}
+{/* SHIPPING / ORDER STATUS TIMELINE                           */}
+{/* ========================================================== */}
 
-          <View
-  style={[
-    styles.liveStatusCard,
-    isCancelled && {
-      backgroundColor: '#FFF2F2',
-      borderColor: 'rgba(255,59,48,0.15)',
-    },
-    isRTL && { alignItems: 'flex-end' },
-  ]}
->
+<View style={styles.section}>
+
   <Text
     style={[
-      styles.liveStatusLabel,
-      isCancelled && { color: '#FF3B30' },
+      styles.sectionLabel,
+      isRTL && {
+        textAlign: 'right',
+      },
     ]}
   >
-    {t('liveDeliveryStatus') ||
-      'LIVE DELIVERY STATUS'}
+    {(
+      t('orderStatus') ||
+      'ORDER STATUS'
+    ).toUpperCase()}
   </Text>
 
- <Text
-  style={[
-    styles.liveStatusValue,
-    isCancelled && { color: '#FF3B30' },
-  ]}
->
-  {(
-    t(`${rawStatus}`) ||
-    rawStatus.replace(/_/g, ' ')
-  ).toUpperCase()}
-</Text>
-</View>
 
-{showReasonLog && (
-  <View style={styles.userAppRejectionLogCard}>
-    <View style={styles.rejectionLogTitleHeaderRow}>
+  {/* ======================================================== */}
+  {/* CURRENT STATUS                                           */}
+  {/* ======================================================== */}
+
+  <View
+    style={[
+      styles.liveStatusCard,
+      isCancelled && {
+        backgroundColor: '#FFF2F2',
+        borderColor: 'rgba(255,59,48,0.15)',
+      },
+      isRTL && {
+        alignItems: 'flex-end',
+      },
+    ]}
+  >
+
+    <Text
+      style={[
+        styles.liveStatusLabel,
+        isCancelled && {
+          color: '#FF3B30',
+        },
+      ]}
+    >
+      {(
+        t('liveDeliveryStatus') ||
+        'LIVE DELIVERY STATUS'
+      )}
+    </Text>
+
+    <Text
+      style={[
+        styles.liveStatusValue,
+        isCancelled && {
+          color: '#FF3B30',
+        },
+      ]}
+    >
+      {(
+  t(currentStatusString) ||
+  currentStatusString.replace(/_/g, ' ')
+).toUpperCase()}
+    </Text>
+
+  </View>
+
+{/* ======================================================== */}
+{/* SHEIN-STYLE HORIZONTAL ORDER TIMELINE                   */}
+{/* ======================================================== */}
+
+{/* ======================================================== */}
+{/* SHEIN-STYLE ORDER TRACKING TIMELINE                     */}
+{/* ======================================================== */}
+
+{!isCancelled && (
+  <View
+    style={[
+      styles.orderTimelineOuter,
+      isRTL && {
+        direction: 'rtl',
+      },
+    ]}
+  >
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={[
+        styles.orderTimelineScrollContent,
+        isRTL && {
+          flexDirection: 'row-reverse',
+        },
+      ]}
+    >
+      {ORDER_TIMELINE_STAGES.map((stage, index) => {
+        const isCompleted =
+          index < safeTimelineIndex;
+
+        const isCurrent =
+          index === safeTimelineIndex;
+
+        const isFuture =
+          index > safeTimelineIndex;
+
+        return (
+          <View
+            key={stage.key}
+            style={[
+              styles.orderTimelineStage,
+              isRTL && {
+                direction: 'rtl',
+              },
+            ]}
+          >
+            {/* ================================================= */}
+            {/* STAGE NAME — ABOVE THE TRACKING LINE             */}
+            {/* ================================================= */}
+
+            <Text
+              style={[
+                styles.orderTimelineLabel,
+
+                isCompleted && {
+                  color: '#111111',
+                },
+
+                isCurrent && {
+                  color: '#111111',
+                  fontWeight: '900',
+                },
+
+                isFuture && {
+                  color: '#A1A1AA',
+                },
+              ]}
+              numberOfLines={2}
+            >
+              {(
+                t(stage.label) ||
+                stage.label.replace(/_/g, ' ')
+              ).toUpperCase()}
+            </Text>
+
+            {/* ================================================= */}
+            {/* TRACKING LINE + SMALL STAGE DOT                  */}
+            {/* ================================================= */}
+
+            <View style={styles.orderTimelineTrackRow}>
+
+              {/* LEFT HALF OF LINE */}
+
+              {index > 0 ? (
+                <View
+                  style={[
+                    styles.orderTimelineConnector,
+                    isCompleted && {
+                      backgroundColor: '#111111',
+                    },
+                  ]}
+                />
+              ) : (
+                <View
+                  style={styles.orderTimelineConnectorPlaceholder}
+                />
+              )}
+
+              {/* STAGE DOT */}
+
+              <View
+                style={[
+                  styles.orderTimelinePoint,
+
+                  isFuture && {
+                    backgroundColor: '#FFFFFF',
+                    borderColor: '#D4D4D8',
+                  },
+
+                  isCompleted && {
+                    backgroundColor: '#111111',
+                    borderColor: '#111111',
+                  },
+
+                  isCurrent && {
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: '#111111',
+                    borderColor: '#111111',
+                  },
+                ]}
+              />
+
+              {/* RIGHT HALF OF LINE */}
+
+              {index <
+              ORDER_TIMELINE_STAGES.length - 1 ? (
+                <View
+                  style={[
+                    styles.orderTimelineConnector,
+                    isCompleted && {
+                      backgroundColor: '#111111',
+                    },
+                  ]}
+                />
+              ) : (
+                <View
+                  style={styles.orderTimelineConnectorPlaceholder}
+                />
+              )}
+
+            </View>
+          </View>
+        );
+      })}
+    </ScrollView>
+  </View>
+)}
+
+  {/* ======================================================== */}
+  {/* CANCELLED / REFUND STATES                                */}
+  {/* ======================================================== */}
+
+  {isCancelled && (
+    <View
+      style={[
+        styles.orderTimelineSpecialState,
+        {
+          backgroundColor: '#FFF2F2',
+          borderColor: '#FECACA',
+        },
+        isRTL && {
+          alignItems: 'flex-end',
+        },
+      ]}
+    >
+
       <Ionicons
-        name="document-text-outline"
-        size={14}
-        color="#FF3B30"
-        style={{ marginRight: 6 }}
+        name="close-circle"
+        size={22}
+        color="#DC2626"
       />
-<Text style={styles.userAppRejectionLogTitleText}>
-  {t('status_log_title')}
-</Text>
-    </View>
 
-    {order?.refundReason && (
-      <>
-       <Text style={[
-  styles.userAppRejectionLogBodyText,
-  { fontWeight: '700' }
-]}>
-  {t('refund_user_request')}
-</Text>
-
-        <Text style={styles.userAppRejectionLogBodyText}>
-          {order.refundReason}
-        </Text>
-      </>
-    )}
-
-    {order?.refundAdminNote && (
-      <>
-       <Text style={[
-  styles.userAppRejectionLogBodyText,
-  { marginTop: 12, fontWeight: '700', color: '#DC2626' }
-]}>
-  {t('refund_admin_decision')}
-</Text>
+      <View
+        style={[
+          {
+            flex: 1,
+            marginLeft: 10,
+          },
+          isRTL && {
+            marginLeft: 0,
+            marginRight: 10,
+            alignItems: 'flex-end',
+          },
+        ]}
+      >
 
         <Text
           style={[
-            styles.userAppRejectionLogBodyText,
-            { color: '#DC2626' },
+            styles.orderTimelineSpecialTitle,
+            {
+              color: '#DC2626',
+            },
+            isRTL && {
+              textAlign: 'right',
+            },
           ]}
         >
-          {order.refundAdminNote}
+          {(
+            t('cancelled') ||
+            'ORDER CANCELLED'
+          ).toUpperCase()}
         </Text>
-      </>
-    )}
 
-    {order?.rejectionReason && (
-      <>
-       <Text style={[
-  styles.userAppRejectionLogBodyText,
-  { marginTop: 12, fontWeight: '700' }
-]}>
-  {t('order_rejection')}
-</Text>
-
-        <Text style={styles.userAppRejectionLogBodyText}>
-          {order.rejectionReason}
+        <Text
+          style={[
+            styles.orderTimelineSpecialText,
+            isRTL && {
+              textAlign: 'right',
+            },
+          ]}
+        >
+          {(
+            t('orderCancelledDescription') ||
+            'This order is no longer being processed.'
+          )}
         </Text>
-      </>
-    )}
-  </View>
-)}
-            {/* ITEMS MANIFEST SPECIFIC GRID NODES */}
-            {/* ITEMS MANIFEST SPECIFIC GRID NODES */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionLabel, isRTL && { textAlign: 'right' }]}>
-                {(t('items') || 'ITEMS').toUpperCase()} ({toLocalNumbers(Array.isArray(order?.items) ? order.items.length : 0)})
-              </Text>
 
-              {/* 🎯 HYPER-SAFE OPTIONAL CHAINING UNIFIER:
-                  Guarantees that your loop degrades gracefully if state arrays are temporarily unhydrated! */}
-              {(Array.isArray(order?.items) ? order.items : []).map((item: any, idx: number) => {
-                const productDisplayTitle = 
-                  locale === 'ps' ? (item.namePs || item.name_ps || item.productName || item.name) : 
-                  locale === 'fa' ? (item.nameFa || item.name_fa || item.productName || item.name) : 
-                  (item.productName || item.name);
+      </View>
 
-                // Safe parsing removes comma format characters from single item rows instantly
-                const editedQuantity = getEditedQuantity(item);
-                const singleItemCleanPrice = parseFloat(String(item.price || '0').replace(/,/g, '')) || 0;
-                const computedItemRowCost = Math.round(singleItemCleanPrice * editedQuantity);
+    </View>
+  )}
 
-                return (
-                  <View key={`order-item-slat-${idx}`} style={[styles.itemRow, isRTL && { flexDirection: 'row-reverse' }]}>
-                    <Image
-                      source={{ uri: item.productImage || item.imageUrl }}
-                      style={styles.thumb}
-                    />
-
-                    <View style={[{ flex: 1 }, isRTL ? { marginRight: 12, alignItems: 'flex-end' } : { marginLeft: 12, alignItems: 'flex-start' }]}>
-                      <Text style={[styles.itemName, isRTL && { textAlign: 'right' }]} numberOfLines={1}>
-                        {(productDisplayTitle || "UNNAMED PIECE").toUpperCase()}
-                      </Text>
-
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <TouchableOpacity
-                            disabled={saveSubmitting || isCancelled || isDelivered}
-                            onPress={() => handleQuantityChange(item.id, -1)}
-                            style={styles.qtyBtn}
-                          >
-                            <Text style={styles.qtyBtnText}>-</Text>
-                          </TouchableOpacity>
-
-                          <Text style={[styles.itemMeta, { marginHorizontal: 10, minWidth: 24, textAlign: 'center' }]}>{toLocalNumbers(getEditedQuantity(item))}</Text>
-
-                          <TouchableOpacity
-                            disabled={saveSubmitting || isCancelled || isDelivered}
-                            onPress={() => handleQuantityChange(item.id, 1)}
-                            style={styles.qtyBtn}
-                          >
-                            <Text style={styles.qtyBtnText}>+</Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        <Text style={[styles.itemMeta, { marginLeft: 14 }]}>
-                          {t('size') || 'Size'}: {item.selectedSize || item.size || 'Standard'}
-                        </Text>
-                      </View>
-
-                      <Text style={styles.priceText}>
-                        {isRTL ? `${toLocalNumbers(computedItemRowCost)} افغانۍ` : `AFN ${toLocalNumbers(computedItemRowCost.toLocaleString())}`}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-
-            {hasQuantityChanges && (
-              <View style={[styles.section, { marginTop: 12, backgroundColor: '#F9FAFB' }]}> 
-                <Text style={[styles.sectionLabel, { marginBottom: 10 }]}> 
-                  {t('saveChanges') || 'SAVE CHANGES'}
-                </Text>
-
-                <TouchableOpacity
-                  disabled={saveSubmitting || isCancelled || isDelivered}
-                  style={[styles.reviewBtn, { backgroundColor: saveSubmitting ? '#888' : '#111' }]}
-                  onPress={saveQuantityChanges}
-                >
-                  <Text style={styles.reviewBtnText}>
-                    {saveSubmitting ? (t('saving') || 'SAVING...') : (t('saveQuantityChanges') || 'SAVE QUANTITY CHANGES').toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
+</View>
 
 {canRequestRefund && (
   <View style={styles.section}>
@@ -1221,6 +1378,7 @@ modalTitle: {
   color: '#111',
 },
 
+
 input: {
   borderWidth: 1,
   borderColor: '#E5E5E5',
@@ -1505,4 +1663,170 @@ input: {
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
+  orderTimelineOuter: {
+  marginTop: 14,
+  width: '100%',
+  overflow: 'hidden',
+},
+
+orderTimelineScrollContent: {
+  paddingVertical: 18,
+  paddingHorizontal: 8,
+  alignItems: 'flex-start',
+},
+
+orderTimelineStage: {
+  width: 125,
+  alignItems: 'center',
+},
+
+orderTimelinePointRow: {
+  width: 125,
+  height: 28,
+  alignItems: 'center',
+},
+
+orderTimelineConnector: {
+  height: 2,
+  width: 44,
+  backgroundColor: '#E5E7EB',
+},
+
+orderTimelinePoint: {
+  width: 24,
+  height: 24,
+  borderRadius: 12,
+  borderWidth: 2,
+  borderColor: '#E5E7EB',
+  backgroundColor: '#FFFFFF',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 2,
+},
+
+orderTimelineCurrentDot: {
+  width: 7,
+  height: 7,
+  borderRadius: 4,
+  backgroundColor: '#FFFFFF',
+},
+
+orderTimelineLabel: {
+  marginTop: 10,
+  width: 112,
+  minHeight: 32,
+  textAlign: 'center',
+  fontSize: 9,
+  fontWeight: '700',
+  letterSpacing: 0.4,
+  color: '#9CA3AF',
+},
+
+orderTimelineCurrentBadge: {
+  marginTop: 5,
+  paddingHorizontal: 7,
+  paddingVertical: 3,
+  borderRadius: 8,
+  backgroundColor: '#111111',
+},
+
+orderTimelineCurrentBadgeText: {
+  color: '#FFFFFF',
+  fontSize: 7,
+  fontWeight: '900',
+  letterSpacing: 0.5,
+},
+
+orderTimelineSpecialState: {
+  marginTop: 14,
+  padding: 14,
+  borderRadius: 12,
+  borderWidth: 1,
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+
+orderTimelineSpecialTitle: {
+  fontSize: 11,
+  fontWeight: '900',
+  letterSpacing: 0.5,
+},
+
+orderTimelineSpecialText: {
+  marginTop: 4,
+  fontSize: 10,
+  lineHeight: 15,
+  color: '#6B7280',
+},
+// =========================
+// SHEIN-STYLE ORDER TIMELINE
+// =========================
+
+orderTimelineOuter: {
+  width: '100%',
+  marginTop: 14,
+  overflow: 'hidden',
+},
+
+orderTimelineScrollContent: {
+  paddingHorizontal: 10,
+  paddingTop: 6,
+  paddingBottom: 14,
+  alignItems: 'flex-end',
+},
+
+orderTimelineStage: {
+  width: 120,
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+},
+
+orderTimelineLabel: {
+  width: 108,
+  minHeight: 28,
+  marginBottom: 9,
+
+  textAlign: 'center',
+
+  fontSize: 9,
+  lineHeight: 12,
+  fontWeight: '700',
+  letterSpacing: 0.35,
+
+  color: '#A1A1AA',
+},
+
+orderTimelineTrackRow: {
+  width: 120,
+  height: 14,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+orderTimelineConnector: {
+  flex: 1,
+  height: 2,
+  backgroundColor: '#E5E7EB',
+},
+
+orderTimelineConnectorPlaceholder: {
+  flex: 1,
+  height: 2,
+  backgroundColor: 'transparent',
+},
+
+orderTimelinePoint: {
+  width: 7,
+  height: 7,
+  borderRadius: 4,
+
+  backgroundColor: '#FFFFFF',
+
+  borderWidth: 1.5,
+  borderColor: '#D4D4D8',
+
+  zIndex: 5,
+},
 });

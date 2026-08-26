@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef,   createContext,
+
+  useContext,
+   } from 'react';
 import {
   ScrollView, TouchableOpacity, Text, StyleSheet, View, 
   Dimensions, RefreshControl, TextInput, ActivityIndicator,
@@ -13,7 +16,9 @@ import {
 import { useLanguage } from '@/Contexts/LanguageContext';
 import CachedImage from '@/components/CachedImage';
 import SkeletonGrid from '@/components/SkeletonGrid';
-import { API_URL } from "@/lib/config"
+import { API_URL } from "@/lib/config";
+import { useHomeTab } from '@/Contexts/HomeTabContext';
+
 const { width } = Dimensions.get('window');
 // Premium 2-column calculation spacing accounts for side edge insets
 const PRODUCT_CARD_WIDTH = (width - 42) / 2; 
@@ -28,8 +33,14 @@ export default function HomePage() {
   const searchInputRefValue = useRef('');
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [advertisements, setAdvertisements] = useState<any[]>([]);
-const flatListRef = useRef<FlatList>(null);
+const homeListRef = useRef<FlatList>(null);
+const adsListRef = useRef<FlatList>(null);
 const [activeAdIndex, setActiveAdIndex] = useState(0);
+const {
+  registerHomeActions,
+} = useHomeTab();
+const catalogSyncInProgressRef = useRef(false);
+
 
   const getLocalizedCategoryLabel = (cat: any) =>
     locale === 'ps' ? (cat.namePs || cat.name) :
@@ -44,6 +55,35 @@ const homeSearchInputRef = useRef<TextInput>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [remoteSyncing, setRemoteSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+
+const safeFetchAndSyncProducts = useCallback(
+  async (limit = 50, page = 1) => {
+    if (catalogSyncInProgressRef.current) {
+      console.log(
+        '⏳ Catalog sync already running, skipping product sync.'
+      );
+      return [];
+    }
+
+    catalogSyncInProgressRef.current = true;
+
+    try {
+      return await fetchAndSyncProducts(limit, page);
+    } catch (error) {
+      console.warn(
+        '⚠️ Product synchronization failed:',
+        error
+      );
+
+      return [];
+    } finally {
+      catalogSyncInProgressRef.current = false;
+    }
+  },
+  []
+);
+
 
   // 🎯 THE STABLE SECURED ATOMIC SYSTEM LOADER (HOME VIEW)
   const handleLoadData = useCallback(async (isInitialLoad = false) => {
@@ -89,39 +129,54 @@ const homeSearchInputRef = useRef<TextInput>(null);
 
       online = await isOnline().catch(() => false);
 
-      if (!hasLocalData && online) {
-        remoteSyncAttempted = true;
-        const syncSuccess = await syncRemoteCatalog().catch((e) => {
-          console.warn("⚠️ Initial sync failed:", e?.message || e);
-          execSql('ROLLBACK;').catch(() => {});
-          return false;
-        });
+   if (!hasLocalData && online) {
+  remoteSyncAttempted = true;
 
-        if (syncSuccess && isMounted.current) {
-          const freshCats = await loadCategoriesLocal().catch(() => []);
-          const freshProds = await loadProductsLocal().catch(() => []);
-          let freshSettingsQuery = await execSql('SELECT * FROM app_settings LIMIT 1;').catch(() => null);
-          if (!freshSettingsQuery || freshSettingsQuery.length === 0) {
-            freshSettingsQuery = await execSql('SELECT * FROM local_settings LIMIT 1;').catch(() => null);
-          }
+  const syncSuccess = await safeSyncRemoteCatalog();
 
-          if (isMounted.current) {
-            if (freshSettingsQuery && freshSettingsQuery.length > 0) {
-              setSettings(freshSettingsQuery[0]);
-              console.log("✨ [LIVE MARKUP SYNC] Fresh exchange rates written atomically into home memory.");
-            }
-            setCategories(freshCats || []);
-            setProducts(shuffleArray(freshProds || []));
-          }
-        }
+  if (syncSuccess && isMounted.current) {
+    const freshCats = await loadCategoriesLocal().catch(() => []);
+    const freshProds = await loadProductsLocal().catch(() => []);
+
+    let freshSettingsQuery =
+      await execSql(
+        'SELECT * FROM app_settings LIMIT 1;'
+      ).catch(() => null);
+
+    if (
+      !freshSettingsQuery ||
+      freshSettingsQuery.length === 0
+    ) {
+      freshSettingsQuery =
+        await execSql(
+          'SELECT * FROM local_settings LIMIT 1;'
+        ).catch(() => null);
+    }
+
+    if (isMounted.current) {
+      if (
+        freshSettingsQuery &&
+        freshSettingsQuery.length > 0
+      ) {
+        setSettings(freshSettingsQuery[0]);
       }
+
+      setCategories(freshCats || []);
+      setProducts(
+        shuffleArray(freshProds || [])
+      );
+
+      setIsLoading(false);
+    }
+  }
+}
 
       if (online && hasLocalData) {
         setTimeout(async () => {
           if (!isMounted.current) return;
           console.log("🛰️ [BACKGROUND TASK] Starting catalog cloud synchronization pass safely...");
 
-          const syncSuccess = await syncRemoteCatalog().catch((e) => {
+          const syncSuccess = await safeSyncRemoteCatalog().catch((e) => {
             console.warn("⚠️ Background cache sync transaction rejected, releasing locks:", e.message || e);
             execSql('ROLLBACK;').catch(() => {});
             return false;
@@ -148,18 +203,38 @@ const homeSearchInputRef = useRef<TextInput>(null);
       }
 
       // Kick off an explicit product sync to fetch more items lazily
-      try {
-        setRemoteSyncing(true);
-        const synced = await fetchAndSyncProducts(50, 1);
-        if (synced && synced.length > 0 && isMounted.current) {
-          const freshProds = await loadProductsLocal().catch(() => []);
-          if (isMounted.current) setProducts(shuffleArray(freshProds || []));
-        }
-      } catch (e) {
-        console.warn('Background product sync error', e);
-      } finally {
-        setRemoteSyncing(false);
+    try {
+  if (online) {
+    setRemoteSyncing(true);
+
+    const synced =
+      await safeFetchAndSyncProducts(50, 1);
+
+    if (
+      synced &&
+      synced.length > 0 &&
+      isMounted.current
+    ) {
+      const freshProds =
+        await loadProductsLocal().catch(() => []);
+
+      if (isMounted.current) {
+        setProducts(
+          shuffleArray(freshProds || [])
+        );
       }
+    }
+  }
+} catch (e) {
+  console.warn(
+    'Background product sync error',
+    e
+  );
+} finally {
+  if (isMounted.current) {
+    setRemoteSyncing(false);
+  }
+}
 
       try {
         const adsRes = await fetch(`${API_URL}/advertisements`);
@@ -180,17 +255,40 @@ const homeSearchInputRef = useRef<TextInput>(null);
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [])
 
-  // 🎯 THE UNIQUE LIFE-CYCLE CONTROL PANEL MOUNT:
+  
   // EXACTLY ONE mount listener is preserved, eliminating concurrent thread resource competition!
-  useEffect(() => {
-    isMounted.current = true;
-    handleLoadData(true);
-    return () => { 
-      isMounted.current = false; 
-    };
-  }, [handleLoadData]);
+// HOME TAB ACTIONS
+useEffect(() => {
+  registerHomeActions({
+    scrollToTop: () => {
+      homeListRef.current?.scrollToOffset({
+        offset: 0,
+        animated: true,
+      });
+    },
+
+    refresh: async () => {
+      homeListRef.current?.scrollToOffset({
+        offset: 0,
+        animated: true,
+      });
+
+      await handleLoadData(false);
+    },
+  });
+
+  return () => {
+    registerHomeActions(null);
+  };
+}, [registerHomeActions, handleLoadData]);
+
+
+// INITIAL HOME LOAD — RUN ONCE
+useEffect(() => {
+  handleLoadData(true);
+}, []);
 
 
   useEffect(() => {
@@ -201,7 +299,7 @@ const homeSearchInputRef = useRef<TextInput>(null);
       const nextIndex =
         prev === advertisements.length - 1 ? 0 : prev + 1;
 
-      flatListRef.current?.scrollToIndex({
+      adsListRef.current?.scrollToIndex({
         index: nextIndex,
         animated: true,
       });
@@ -241,6 +339,30 @@ const homeSearchInputRef = useRef<TextInput>(null);
     };
   };
 
+
+const safeSyncRemoteCatalog = useCallback(async () => {
+  if (catalogSyncInProgressRef.current) {
+    console.log('⏳ Catalog sync already running, skipping duplicate sync.');
+    return false;
+  }
+
+  catalogSyncInProgressRef.current = true;
+
+  try {
+    return await syncRemoteCatalog();
+  } catch (error) {
+    console.warn(
+      '⚠️ Catalog synchronization failed:',
+      error
+    );
+
+    return false;
+  } finally {
+    catalogSyncInProgressRef.current = false;
+  }
+}, []);
+
+
     // 🎯 MULTILINGUAL LOCALE SEARCH INTERCEPTOR
   // Upgraded to filter safely across both camelCase and snake_case data layers
   const filteredProducts = useMemo(() => {
@@ -268,7 +390,7 @@ const renderAdvertisements = useCallback(() => {
   return (
     <View style={styles.adsWrapper}>
       <FlatList
-        ref={flatListRef}
+         ref={adsListRef} 
         data={advertisements}
         horizontal
         pagingEnabled
@@ -487,7 +609,8 @@ const renderHomeHeaderAndCategories = useCallback(() => {
  return (
   <View style={styles.container}>
     <FlatList
-      data={filteredProducts}
+       ref={homeListRef}
+  data={filteredProducts}
       renderItem={renderProductItemCell}
       keyExtractor={(item) => `home-prod-${item.id}`}
       numColumns={2}

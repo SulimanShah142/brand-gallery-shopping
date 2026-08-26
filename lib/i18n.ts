@@ -15,7 +15,9 @@ const TRANSLATIONS: Record<Locale, Record<string, string>> = {
 searchProduct: "SEARCH BRAND GALLERY...",
 shareYourExperience: "SHARE YOUR EXPERIENCE",
 addPhotos: "ADD PHOTOS",
-
+freeShippingProgressComplete: 'to free delivery',
+freeDeliveryMessage: 'Your order qualifies for free delivery.',
+freeDeliveryUnlocked: 'Free delivery unlocked',
 writeOpinionPlaceholder: "Write your opinion about size, fit, or material...",
 
  shareExperience: "Share Your Experience",
@@ -428,7 +430,9 @@ reasonOther: "سایر موارد",
   "signInRequiredBody": "لطفاً قبل از ثبت سفارش وارد حساب خود شوید یا یک حساب جدید ایجاد کنید.",
 orderInformation: "اطلاعات سفارش",
 paymentMethod: "روش پرداخت",
-
+freeShippingProgressComplete: 'تا ارسال رایگان',
+freeDeliveryMessage: 'سفارش شما شامل ارسال رایگان می‌شود.',
+freeDeliveryUnlocked: 'ارسال رایگان فعال شد',
 customerNotes: "یادداشت مشتری",
 
 subtotal: "جمع فرعی",
@@ -753,7 +757,9 @@ sizeRequired: "مهرباني وکړئ د پرمخ تلو دمخه د محصول
 colorRequired: "مهرباني وکړئ د پرمخ تلو دمخه د محصول رنګ غوره کړئ.",
 addedToBag: "کارټ ته اضافه شو",
 addedToBagBody: "محصول {name} (اندازه: {size} / رنګ: {color}) په بریالیتوب سره ستاسو په کارټ کې اضافه شو.",
-
+freeShippingProgressComplete: 'تر وړیا رسونې پورې',
+freeDeliveryMessage: 'ستاسو فرمایش د وړیا رسونې شرایط پوره کوي.',
+freeDeliveryUnlocked: 'وړیا رسونه فعاله شوه',
     // Authentication Screens
     createAccount: 'حساب جوړ کړئ',
     signUpSubtitle: 'خپل د خوښې کالیو پیرلو لپاره همدا اوس راجستر شئ.',

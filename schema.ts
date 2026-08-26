@@ -1,7 +1,8 @@
 import { 
   pgTable, text, timestamp, boolean, uuid, pgEnum, 
   integer, numeric, decimal, index ,uniqueIndex,
-   foreignKey, real, varchar
+   foreignKey, real, varchar,
+   jsonb
 } from "drizzle-orm/pg-core";
 // 1. Roles Enum (Marketplace wide)
 export const roleEnum = pgEnum('user_role', ['admin', 'seller', 'deliverer', 'customer']);
@@ -219,55 +220,130 @@ export const categories = pgTable('categories', {
 // =========================================================================
 // 🎯 2. MULTILINGUAL PRODUCTS TABLE SCHEMA
 // =========================================================================
-export const products = pgTable('products', {
-  id: uuid('id').primaryKey().defaultRandom(),
+// =========================================================================
+// 🎯 PRODUCTS
+// =========================================================================
 
-  categoryId: uuid('category_id').references(() => categories.id),
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .defaultRandom(),
 
-  // 🌍 LOCALIZED PRODUCT NAME
-  name: text('name').notNull(),
-  namePs: text('name_ps'),
-  nameFa: text('name_fa'),
+    categoryId: uuid("category_id")
+      .references(() => categories.id),
 
-  // 🌍 LOCALIZED DESCRIPTION
-  description: text('description'),
-  descriptionPs: text('description_ps'),
-  descriptionFa: text('description_fa'),
+    // ======================================================
+    // MULTILINGUAL PRODUCT NAME
+    // ======================================================
 
-  usdPrice: numeric('usd_price', {
-    precision: 10,
-    scale: 2,
-  }).notNull(),
+    name: text("name")
+      .notNull(),
 
-  profitPercentage: numeric('profit_percentage', { precision: 5, scale: 2 }).default('20.00'),
+    namePs: text("name_ps"),
 
-  // Main Image
-  imageUrl: text('image_url'),
+    nameFa: text("name_fa"),
 
-  // ✅ NEW
-  // Same order as availableColors
-  colorImageUrls: text('color_image_urls').array(),
+    // ======================================================
+    // MULTILINGUAL PRODUCT DESCRIPTION
+    // ======================================================
 
-  // Sizes
-  availableSizes: text('available_sizes').array(),
+    description: text("description"),
 
-  // Colors
-  availableColors: text('available_colors').array(),
-  availableColorsPs: text('available_colors_ps').array(),
-  availableColorsFa: text('available_colors_fa').array(),
+    descriptionPs: text("description_ps"),
 
-  stockQuantity: integer('stock_quantity').default(0),
+    descriptionFa: text("description_fa"),
 
-  isAvailable: boolean('is_available').default(true),
+    // ======================================================
+    // PRICING
+    // ======================================================
 
-  // Soft-delete flag so admins can "delete" products without breaking order history
-  isDeleted: boolean('is_deleted').notNull().default(false),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    usdPrice: numeric("usd_price", {
+      precision: 10,
+      scale: 2,
+    }).notNull(),
 
-  createdAt: timestamp('created_at').defaultNow(),
+    profitPercentage: numeric(
+      "profit_percentage",
+      {
+        precision: 5,
+        scale: 2,
+      }
+    ).default("20.00"),
 
-  updatedAt: timestamp('updated_at').defaultNow(),
-});
+    // ======================================================
+    // MAIN PRODUCT IMAGE
+    // ======================================================
+
+    imageUrl: text("image_url"),
+
+    // ======================================================
+    // LEGACY COLOR IMAGE SYSTEM
+    //
+    // Keep these for compatibility with the existing
+    // backend/frontend until everything is migrated.
+    // New color functionality should use productColors.
+    // ======================================================
+
+    colorImageUrls: text("color_image_urls").array(),
+
+    // ======================================================
+    // LEGACY SIZE/COLOR ARRAYS
+    //
+    // Keep them for compatibility with existing code.
+    // The new detailed color system uses productColors.
+    // ======================================================
+
+    availableSizes: text("available_sizes").array(),
+
+    availableColors: text("available_colors").array(),
+
+    availableColorsPs: text("available_colors_ps").array(),
+
+    availableColorsFa: text("available_colors_fa").array(),
+
+    // ======================================================
+    // STOCK
+    // ======================================================
+
+    stockQuantity: integer("stock_quantity")
+      .default(0),
+
+    isAvailable: boolean("is_available")
+      .notNull()
+      .default(true),
+
+    // ======================================================
+    // SOFT DELETE
+    // ======================================================
+
+    isDeleted: boolean("is_deleted")
+      .notNull()
+      .default(false),
+
+    deletedAt: timestamp(
+      "deleted_at",
+      {
+        withTimezone: true,
+      }
+    ),
+
+    // ======================================================
+    // TIMESTAMPS
+    // ======================================================
+
+    createdAt: timestamp(
+      "created_at"
+    )
+      .defaultNow(),
+
+    updatedAt: timestamp(
+      "updated_at"
+    )
+      .defaultNow(),
+  }
+);
 
 
 
@@ -280,6 +356,244 @@ export const productVariants = pgTable('product_variants', {
   stockQuantity: integer('stock_quantity').default(0),
   additionalPrice: numeric('additional_price', { precision: 10, scale: 2 }).default('0.00'),
 });
+
+
+
+// ======================================================
+// PRODUCT COLORS
+// ======================================================
+// Each product can have multiple colors.
+// Every color has its own image.
+// Example:
+// Product → Black → black-shirt.jpg
+//        → White → white-shirt.jpg
+//        → Blue  → blue-shirt.jpg
+// ======================================================
+
+// =========================================================================
+// 🎨 PRODUCT COLORS
+// =========================================================================
+//
+// Every product can have unlimited colors.
+//
+// Product
+//   ├── Black  → black-image.jpg
+//   ├── White  → white-image.jpg
+//   ├── Blue   → blue-image.jpg
+//   └── Red    → red-image.jpg
+//
+// This is the proper source of truth for the new color system.
+// =========================================================================
+
+export const productColors = pgTable(
+  "product_colors",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .defaultRandom(),
+
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, {
+        onDelete: "cascade",
+      }),
+
+    // ======================================================
+    // COLOR NAME
+    // ======================================================
+
+    name: text("name")
+      .notNull(),
+
+    namePs: text("name_ps"),
+
+    nameFa: text("name_fa"),
+
+    // Optional actual color value
+    // Example: #000000
+    colorCode: text("color_code"),
+
+    // ======================================================
+    // IMAGE FOR THIS SPECIFIC COLOR
+    // ======================================================
+
+    imageUrl: text("image_url"),
+
+    // ======================================================
+    // DISPLAY ORDER
+    // ======================================================
+
+    sortOrder: integer("sort_order")
+      .notNull()
+      .default(0),
+
+    createdAt: timestamp(
+      "created_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp(
+      "updated_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    productIdx: index(
+      "product_colors_product_idx"
+    ).on(table.productId),
+  })
+);
+
+
+// ======================================================
+// PRODUCT SPECIFICATION / SIZE GUIDE TABLES
+// ======================================================
+//
+// Product
+//   └── productSizeGuides
+//          ├── Size Guide
+//          │      ├── S
+//          │      ├── M
+//          │      └── L
+//          │
+//          └── Material Information
+//                 ├── Cotton
+//                 └── Polyester
+//
+// This gives us a flexible specification system while
+// still supporting the current frontend "sizeGuide"
+// compatibility object.
+// ======================================================
+
+export const productSizeGuides = pgTable(
+  "product_size_guides",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .defaultRandom(),
+
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, {
+        onDelete: "cascade",
+      }),
+
+    title: text("title")
+      .notNull()
+      .default("Size Guide"),
+
+    titlePs: text("title_ps"),
+
+    titleFa: text("title_fa"),
+
+    isActive: boolean("is_active")
+      .notNull()
+      .default(true),
+
+    sortOrder: integer("sort_order")
+      .notNull()
+      .default(0),
+
+    createdAt: timestamp(
+      "created_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp(
+      "updated_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    productIdx: index(
+      "product_size_guides_product_idx"
+    ).on(table.productId),
+  })
+);
+
+
+// ======================================================
+// PRODUCT SIZE GUIDE ROWS
+// ======================================================
+//
+// Example:
+//
+// Size | Height | Chest | Waist | Length
+// -----|--------|-------|-------|-------
+// S    | 68 cm  | 100cm | 90cm | 70cm
+// M    | 70 cm  | 104cm | 94cm | 72cm
+// L    | 72 cm  | 108cm | 98cm | 74cm
+//
+// measurements is intentionally JSONB so different
+// products can have different measurement columns.
+// ======================================================
+
+export const productSizeGuideRows = pgTable(
+  "product_size_guide_rows",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .defaultRandom(),
+
+    sizeGuideId: uuid("size_guide_id")
+      .notNull()
+      .references(() => productSizeGuides.id, {
+        onDelete: "cascade",
+      }),
+
+    size: text("size")
+      .notNull(),
+
+    measurements: jsonb("measurements")
+      .notNull()
+      .default({}),
+
+    sortOrder: integer("sort_order")
+      .notNull()
+      .default(0),
+
+    createdAt: timestamp(
+      "created_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp(
+      "updated_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    sizeGuideIdx: index(
+      "product_size_guide_rows_guide_idx"
+    ).on(table.sizeGuideId),
+  })
+);
+
+
 // server/schema.ts -> Add these fields to appSettings table to unlock limits
 export const appSettings = pgTable('app_settings', {
   id: text('id').primaryKey().default('app-settings'),
@@ -414,48 +728,201 @@ export const orderStatusEnum = pgEnum('order_status', [
 ]);
 
 export const orders = pgTable("orders", {
-  id: uuid("id").primaryKey().defaultRandom(),
- userId: text("user_id")
-  .references(() => user.id)
-  .notNull(),
-  customerName: text("customer_name").notNull(),
-  phoneNumber: text("phone_number").notNull(),
-  address: text("address").notNull(),
-  latitude: decimal("latitude"),
-  longitude: decimal("longitude"),
-  delivererId: uuid("deliverer_id").references(() => deliverers.id),
-   driverLat: text("driver_lat"),
-     shippingFee: text("shipping_fee").default("0").notNull(), 
+  id: uuid("id")
+    .primaryKey()
+    .defaultRandom(),
+
+  userId: text("user_id")
+    .references(() => user.id)
+    .notNull(),
+
+  // =========================================================
+  // CUSTOMER INFORMATION SNAPSHOT
+  // =========================================================
+
+  customerName: text("customer_name")
+    .notNull(),
+
+  phoneNumber: text("phone_number")
+    .notNull(),
+
+  whatsappNumber: text("whatsapp_number"),
+
+  address: text("address")
+    .notNull(),
+
+  // =========================================================
+  // DELIVERY / LOGISTICS
+  // =========================================================
+
+  delivererId: uuid("deliverer_id")
+    .references(() => deliverers.id),
+
+  packagerId: uuid("packager_id")
+    .references(() => deliverers.id),
+
+  shippingFee: numeric("shipping_fee", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  // =========================================================
+  // ORDER PRICING SNAPSHOT
+  // =========================================================
+
+  subtotal: numeric("subtotal", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  promoDiscount: numeric("promo_discount", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  newUserDiscount: numeric("new_user_discount", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  milestoneDiscount: numeric("milestone_discount", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  promoCode: text("promo_code"),
+
+  totalAmount: numeric("total_amount", {
+    precision: 10,
+    scale: 2,
+  })
+    .notNull(),
+
+  // =========================================================
+  // ORDER STATUS
+  // =========================================================
+
+  status: orderStatusEnum("status")
+    .default("pending"),
+
+  rejectionReason: text("rejection_reason"),
+
+  // =========================================================
+  // REFUND FLOW
+  // =========================================================
+
   refundReason: text("refund_reason"),
-refundAdminNote: text("refund_admin_note"),
-refundProcessedAt: timestamp("refund_processed_at"),
+
+  refundAdminNote: text("refund_admin_note"),
+
+  refundProcessedAt: timestamp("refund_processed_at"),
+
+  // =========================================================
+  // PACKAGING / CANCELLATION TIMESTAMPS
+  // =========================================================
+
+  packagedAt: timestamp("packaged_at"),
+
+  cancelledAt: timestamp("cancelled_at"),
+
+  // =========================================================
+  // DELIVERY DRIVER LIVE LOCATION
+  //
+  // IMPORTANT:
+  // These are NOT customer's checkout GPS coordinates.
+  // They belong to the delivery tracking system.
+  // =========================================================
+
+  driverLat: text("driver_lat"),
 
   driverLng: text("driver_lng"),
+
   lastGpsUpdate: timestamp("last_gps_update"),
-  totalAmount: numeric("total_amount", { precision: 10, scale: 2 }).notNull(),
-  status: orderStatusEnum("status").default("pending"),
-  rejectionReason: text("rejection_reason"),
-  createdAt: timestamp("created_at").defaultNow(),
-packagerId: uuid("packager_id")
-  .references(() => deliverers.id),
 
-packagedAt: timestamp("packaged_at"),
+latitude: decimal("latitude", {
+  precision: 10,
+  scale: 7,
+}),
 
-cancelledAt: timestamp("cancelled_at"),
+longitude: decimal("longitude", {
+  precision: 10,
+  scale: 7,
+}),
+  // =========================================================
+  // TIMESTAMPS
+  // =========================================================
 
-updatedAt: timestamp("updated_at")
-  .defaultNow(),
+  createdAt: timestamp("created_at")
+    .defaultNow(),
 
+  updatedAt: timestamp("updated_at")
+    .defaultNow(),
 });
 
 export const orderItems = pgTable("order_items", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  orderId: uuid("order_id").references(() => orders.id),
-  productId: uuid("product_id").references(() => products.id),
-  quantity: integer("quantity").notNull(),
-  price: numeric("price", { precision: 10, scale: 2 }).notNull(),
-  // ADD THESE IF MISSING:
+  id: uuid("id")
+    .primaryKey()
+    .defaultRandom(),
+
+  orderId: uuid("order_id")
+    .references(() => orders.id)
+    .notNull(),
+
+  productId: uuid("product_id")
+    .references(() => products.id)
+    .notNull(),
+
+  quantity: integer("quantity")
+    .notNull(),
+
+  // =========================================================
+  // COMMERCIAL PRICING SNAPSHOT
+  // =========================================================
+
+  // Original/reference price before the existing discount
+  originalPrice: numeric("original_price", {
+    precision: 10,
+    scale: 2,
+  }),
+
+  // Actual price customer receives
+  price: numeric("price", {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+
+  // Difference between originalPrice and price
+  discountAmount: numeric("discount_amount", {
+    precision: 10,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  // Snapshot of the percentage displayed to customer
+  discountPercentage: numeric("discount_percentage", {
+    precision: 5,
+    scale: 2,
+  })
+    .default("0")
+    .notNull(),
+
+  // =========================================================
+  // PRODUCT VARIANT
+  // =========================================================
+
   selectedSize: text("selected_size"),
+
   selectedColor: text("selected_color"),
 });
 

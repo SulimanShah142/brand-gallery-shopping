@@ -16,451 +16,1190 @@ import { API_URL } from '@/lib/config';
 export default function CheckoutScreen() {
   const router = useRouter();
   const { t, isRTL, locale } = useLanguage();
-  const { clearCart, state } = useCart(); 
-// Inside your Checkout component function header:
+  const { clearCart, state } = useCart();
 
-// 🎯 ADD THIS COMPLIANT LIFE-CYCLE ANCHOR:
-const [skipGpsPromptThisSession, setSkipGpsPromptThisSession] = useState(false);
+  const cartItems = state?.items || [];
 
-  const cartItems = state?.items || []; 
-const {
-  data: session,
-  cachedUser,
-  isPending: authPending
-} = authClient.useSession();
+  const {
+    data: session,
+    cachedUser,
+    isPending: authPending,
+  } = authClient.useSession();
+
   const authenticated = Boolean(session?.session?.token);
+
+  // ============================================================
+  // CORE STATE
+  // ============================================================
+
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', phone: '', address: '' });
-  const [coords, setCoords] = useState<[number, number]>([34.5553, 69.2075]);
-  
+
+const [form, setForm] = useState({
+  name: '',
+  phone: '',
+  whatsapp: '',
+  address: '',
+});
+
+  const [coords, setCoords] = useState<[number, number]>([
+    34.5553,
+    69.2075,
+  ]);
+
+  // ============================================================
+  // PROMO
+  // ============================================================
+
   const [promoInput, setPromoInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<any>(null);
   const [promoLoading, setPromoLoading] = useState(false);
-const [showLocationPermissionModal, setShowLocationPermissionModal] =
-  useState(false);
 
-const [locationBootLoading, setLocationBootLoading] =
-  useState(false);
+  // ============================================================
+  // LOCATION
+  // ============================================================
 
-  // 🎯 GOOGLE PLAY / APPLE APP STORE COMPLIANCE STATES
-const [showCustomPermissionModal, setShowCustomPermissionModal] =
-  useState(false);
-const [skipGpsPrompt, setSkipGpsPrompt] = useState(false);
-const [locationLoading, setLocationLoading] =
-  useState(false);
+  const [showCustomPermissionModal, setShowCustomPermissionModal] =
+    useState(false);
 
-const [gpsServicesDisabled, setGpsServicesDisabled] =
-  useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
 
-const [hydratedProductsMap, setHydratedProductsMap] = useState<Record<string, any>>({});
-const [catalogLoading, setCatalogLoading] = useState(true);
+  const [gpsServicesDisabled, setGpsServicesDisabled] = useState(false);
 
-// 🎯 THE REAL-TIME BACKEND FETCH REALIGNMENT CURE:
-// Fetches the live database records on mount to guarantee that newly updated 
-// Pashto and Dari fields render on the screen instantly, avoiding stale states!
+  const [skipGpsPromptThisSession, setSkipGpsPromptThisSession] =
+    useState(false);
 
-useEffect(() => {
-  let mounted = true;
-  async function fetchLiveProductTranslations() {
-    try {
-      const res = await fetch(`${API_URL}/api/products?limit=100`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && mounted) {
-          const mappingDictionary: Record<string, any> = {};
-          data.forEach((p: any) => {
-            mappingDictionary[String(p.id).trim()] = p;
-          });
-          setHydratedProductsMap(mappingDictionary);
+  const permissionFlowStarted = useRef(false);
+
+  // ============================================================
+  // LIVE PRODUCT CATALOG
+  // ============================================================
+
+  const [hydratedProductsMap, setHydratedProductsMap] =
+    useState<Record<string, any>>({});
+
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  // ============================================================
+  // LOCALIZED NUMBER FORMATTER
+  // ============================================================
+
+  const toLocalNumbers = useCallback(
+    (num: string | number) => {
+      const str = Math.ceil(Number(num || 0)).toLocaleString('en-US');
+
+      if (locale === 'en' || !locale) {
+        return str;
+      }
+
+      const easternDigits = [
+        '۰',
+        '۱',
+        '۲',
+        '۳',
+        '۴',
+        '۵',
+        '۶',
+        '۷',
+        '۸',
+        '۹',
+      ];
+
+      return str.replace(/[0-9]/g, (digit) => {
+        return easternDigits[parseInt(digit, 10)];
+      });
+    },
+    [locale]
+  );
+
+  // ============================================================
+  // LIVE PRODUCT HYDRATION
+  // ============================================================
+
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchLiveProducts = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/products?limit=100`
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Product catalog request failed: ${response.status}`
+          );
+        }
+
+        const data = await response.json();
+
+        if (!mounted || !Array.isArray(data)) {
+          return;
+        }
+
+        const mapping: Record<string, any> = {};
+
+        for (const product of data) {
+          if (product?.id) {
+            mapping[String(product.id).trim()] = product;
+          }
+        }
+
+        setHydratedProductsMap(mapping);
+      } catch (error) {
+        console.warn(
+          '⚠️ Live checkout product hydration failed:',
+          error
+        );
+      } finally {
+        if (mounted) {
+          setCatalogLoading(false);
         }
       }
-    } catch (err) {
-      console.warn("⚠️ Live checkout catalog translation fetch skipped:", err);
-    } finally {
-      if (mounted) setCatalogLoading(false);
-    }
-  }
-  fetchLiveProductTranslations();
-  return () => { mounted = false; };
-}, []);
-  
-const permissionFlowStarted =
-  useRef(false);
-  // 1. Initial configurations loading pool
-  useEffect(() => {
+    };
 
-    let active = true;
-    fetch(`${API_URL}/api/admin/settings`)
-      .then(res => res.json())
-      .then(data => { if (active) setSettings(data); })
-      .catch(err => console.error("❌ Settings fetch failure:", err));
-    return () => { active = false; };
+    fetchLiveProducts();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // 🎯 2. AUTOMATED SEEDING GPS PERMISSION LOGIC (NO MANUAL BUTTONS)
- // 🎯 PRODUCTION GPS INITIALIZATION ENGINE
-useEffect(() => {
-if (skipGpsPromptThisSession) return;
-  const initializeCheckoutGpsFlow = async () => {
+  // ============================================================
+  // CHECKOUT SETTINGS
+  // ============================================================
 
-    try {
+  useEffect(() => {
+    let mounted = true;
 
-      console.log(
-        "🛰️ Checkout GPS bootstrap initialized"
-      );
+    const fetchCheckoutSettings = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/admin/settings`
+        );
 
-      if (permissionFlowStarted.current) {
-        return;
-      }
+        if (!response.ok) {
+          throw new Error(
+            `Settings request failed: ${response.status}`
+          );
+        }
 
-      permissionFlowStarted.current = true;
+        const data = await response.json();
 
-      // 🎯 STEP 1: CHECK EXISTING PERMISSION
-      const existingPermission =
-        await Location.getForegroundPermissionsAsync();
-
-      console.log(
-        "📍 Existing Checkout Permission:",
-        existingPermission
-      );
-
-      // 🎯 STEP 2: SHOW BRANDED MODAL IF NOT GRANTED
-      if (!existingPermission.granted) {
-
-        setShowCustomPermissionModal(true);
-
-        return;
-      }
-
-      // 🎯 STEP 3: CHECK GPS HARDWARE
-      const providerStatus =
-        await Location.getProviderStatusAsync();
-
-      console.log(
-        "🛰️ Checkout Provider Status:",
-        providerStatus
-      );
-
-      // 🎯 STEP 4: IF GPS OFF -> SHOW MODAL
-      if (!providerStatus.locationServicesEnabled) {
-
-        setGpsServicesDisabled(true);
-
-        setShowCustomPermissionModal(true);
-
-        return;
-      }
-
-      // 🎯 STEP 5: FETCH LIVE LOCATION
-      const currentPosition =
-        await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-
-      if (currentPosition?.coords) {
-
-        const liveCoords: [number, number] = [
-          currentPosition.coords.latitude,
-          currentPosition.coords.longitude,
-        ];
-
-        setCoords(liveCoords);
-
-        console.log(
-          "✅ Checkout GPS Coordinates:",
-          liveCoords
+        if (mounted) {
+          setSettings(data);
+        }
+      } catch (error) {
+        console.error(
+          '❌ Checkout settings fetch failed:',
+          error
         );
       }
-
-    } catch (gpsErr) {
-
-      console.log(
-        "❌ Checkout GPS bootstrap failed",
-        gpsErr
-      );
-    }
-  };
-
-  initializeCheckoutGpsFlow();
-
-}, []);
-
-
-const toLocalNumbers = (num: string | number) => {
-        const str = Math.ceil(Number(num || 0)).toLocaleString('en-US');
-        if (locale === 'en' || !locale) return str;
-        const easternDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-        return str.replace(/[0-9]/g, (w) => easternDigits[parseInt(w, 10)]);
-      };
-
-   // 🎯 3. ENHANCED SYSTEM-WIDE MULTI-TIER BILLING MATRICES ENGINE (RECONCILED CARRIER LIMITS)
-  const totals = useMemo(() => {
-    const baseDeliveryFee = parseFloat(settings?.deliveryFee || '150');
-    const freeDeliveryLimit = parseFloat(settings?.freeDeliveryThreshold || '2000');
-    
-    const prepayLimit = parseFloat(settings?.prepaymentThreshold || '2500');
-    const prepayPercentage = parseFloat(settings?.prepaymentPercentage || '30');
-    
-    const rewardLimit = parseFloat(settings?.rewardThreshold || '5000');
-    const rewardValueAmount = parseFloat(settings?.rewardValue || '500');
-    const rewardType = settings?.rewardType || 'discount';
-
-    // Calculate baseline contents amount values
-    const calculatedSubtotalAfn = cartItems.reduce((sum: number, item: any) => {
-      const unitPrice = parseFloat(item.price || '0');
-      const itemQuantity = Number(item.quantity) || 1;
-      return sum + (unitPrice * itemQuantity);
-    }, 0);
-
-    // 🎯 1. HARDENED NEW USER DISCOUNT TIMELINE & PURCHASE CAP LATCH (RECONCILED KEYS)
-    let newUserCampaignMarkdownAfn = 0;
-    
-    const isNewUserPromoActive = settings?.newUserDiscountActive !== undefined && 
-      (settings.newUserDiscountActive === true || 
-       String(settings.newUserDiscountActive).toLowerCase() === 'true' || 
-       Number(settings.newUserDiscountActive) === 1);
-
-    // 🎯 THE MULTI-KEY ORDER COUNT EXTRACTION FIX:
-    // Cascades safely through all backend tracking fields (camelCase, snake_case, and sub-object counts).
-    // This blocks undefined evaluation drops, guaranteeing historical orders resolve accurately!
-    const pastOrderCount = cachedUser ? Number(
-      cachedUser.orderCount ?? 
-      cachedUser.ordersCount ?? 
-      cachedUser.order_count ??
-      cachedUser.orders_count ??
-      cachedUser._count?.orders ?? 
-      cachedUser._count?.order ?? 0
-    ) : 0;
-
-    const maxAllowedPurchases = Number(settings?.newUserMaxPurchaseCount || 1);
-    
-    let isCampaignDateValid = true;
-    if (settings?.newUserDiscountExpiresAt) {
-      isCampaignDateValid = new Date() < new Date(settings.newUserDiscountExpiresAt);
-    }
-
-    // 🎯 THE SECURED TRANSIT GATES:
-    // If pastOrderCount evaluates greater than or equal to maxAllowedPurchases (e.g., 1 >= 1),
-    // this execution line jumps cleanly to the fallback block, completely removing the discount!
-    if (isNewUserPromoActive && pastOrderCount < maxAllowedPurchases && isCampaignDateValid) {
-      const discountType = settings?.newUserDiscountType || 'fixed';
-      const rawDiscountValue = parseFloat(settings?.newUserDiscountValue || '0');
-
-      if (discountType === 'percentage') {
-        newUserCampaignMarkdownAfn = calculatedSubtotalAfn * (rawDiscountValue / 100);
-      } else {
-        newUserCampaignMarkdownAfn = rawDiscountValue;
-      }
-      console.log(`✨ [CHECKOUT BONUS] New User Promo active and verified: - AFN ${newUserCampaignMarkdownAfn} (Orders: ${pastOrderCount}/${maxAllowedPurchases})`);
-    } else {
-      console.log(`🔒 [DISCOUNT SECURED] New User campaign dismissed. Purchases count reached: ${pastOrderCount}/${maxAllowedPurchases}`);
-    }
-
-    // 🎯 2. SMARTER MILESTONE REWARD LATCH
-    let rewardDiscountAfn = 0;
-    let earnedGiftText = null;
-
-    const hasAlreadyClaimedMilestoneReward = cachedUser?.hasClaimedMilestoneReward !== undefined &&
-      (cachedUser.hasClaimedMilestoneReward === true || 
-       String(cachedUser.hasClaimedMilestoneReward).toLowerCase() === 'true' ||
-       Number(cachedUser.hasClaimedMilestoneReward) === 1);
-    
-    const pastLifetimeSpendAfn = parseFloat(cachedUser?.totalLifetimeSpend || cachedUser?.total_lifetime_spend || '0');
-
-    const qualifiesByCurrentBasket = calculatedSubtotalAfn >= rewardLimit;
-    const qualifiesByHistoricSpend = pastLifetimeSpendAfn >= rewardLimit;
-
-    if ((qualifiesByCurrentBasket || qualifiesByHistoricSpend) && !hasAlreadyClaimedMilestoneReward) {
-      if (rewardType === 'discount') {
-        rewardDiscountAfn = rewardValueAmount;
-        console.log(`🎉 [MILESTONE LATCH] Applied One-Time AFN ${rewardValueAmount} Spend Discount!`);
-      } else if (rewardType === 'gift') {
-        earnedGiftText = settings?.rewardValue || "FREE GIFT";
-        console.log(`🎁 [MILESTONE LATCH] Free Gift Unlocked: ${earnedGiftText}`);
-      }
-    }
-
-    // 3. STANDARD PROMO CODES VOUCHER HANDLING MATRIX
-    let voucherMarkdownAfn = 0;
-    if (appliedPromo) {
-      voucherMarkdownAfn = appliedPromo.type === 'percentage' 
-        ? calculatedSubtotalAfn * (parseFloat(appliedPromo.value) / 100)
-        : parseFloat(appliedPromo.value);
-    }
-
-    // 4. LOGISTICS SHIPPING FREIGHT CALCULATION
-    const isDeliveryFree = calculatedSubtotalAfn >= freeDeliveryLimit;
-    const shippingCostAfn = isDeliveryFree ? 0 : baseDeliveryFee;
-
-    // Deduct promotions and compile totals invoice balance metrics safely
-    const finalAmountAfn = Math.max(0, 
-      calculatedSubtotalAfn - newUserCampaignMarkdownAfn - voucherMarkdownAfn - rewardDiscountAfn + shippingCostAfn
-    );
-    
-    const requiresPrepayment = finalAmountAfn > prepayLimit;
-    const upfrontPaymentAfn = requiresPrepayment ? Math.ceil(finalAmountAfn * (prepayPercentage / 100)) : 0;
-
-    return {
-      subtotal: calculatedSubtotalAfn,
-      newUserDiscount: newUserCampaignMarkdownAfn,
-      discount: voucherMarkdownAfn,
-      rewardDiscount: rewardDiscountAfn,
-      gift: earnedGiftText,
-      shipping: shippingCostAfn,
-      isFree: isDeliveryFree,
-      final: finalAmountAfn,
-      requiresPrepayment,
-      prepayPercent: prepayPercentage,
-      prepayAmount: upfrontPaymentAfn,
-      triggerMilestoneClaimFlag: (qualifiesByCurrentBasket || qualifiesByHistoricSpend) && !hasAlreadyClaimedMilestoneReward
     };
-  }, [cartItems, settings, appliedPromo, cachedUser]); // Synchronized securely across profile transitions
+
+    fetchCheckoutSettings();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // ============================================================
+  // GPS BOOTSTRAP
+  // ============================================================
+
+  // ============================================================
+  // CHECKOUT TOTALS
+  // ============================================================
+
+const totals = useMemo(() => {
+  // ============================================================
+  // SETTINGS
+  // ============================================================
+
+  const baseDeliveryFee = Number(
+    settings?.deliveryFee ?? 150
+  );
+
+  const freeDeliveryLimit = Number(
+    settings?.freeDeliveryThreshold ?? 2000
+  );
+
+  const prepayLimit = Number(
+    settings?.prepaymentThreshold ?? 2500
+  );
+
+  const prepayPercentage = Number(
+    settings?.prepaymentPercentage ?? 30
+  );
+
+  const rewardLimit = Number(
+    settings?.rewardThreshold ?? 5000
+  );
+
+  const rewardValue = Number(
+    settings?.rewardValue ?? 500
+  );
+
+  const rewardType =
+    settings?.rewardType ?? 'discount';
 
 
-    // 🎯 PROMO CODE LEDGER MATRIX VERIFICATION GATES RESTORED
-  const handleValidatePromo = async () => {
-    if (!promoInput.trim()) {
-      return Alert.alert(t('error') || "Error", "Please enter a valid discount code string.");
-    }
-    
-    setPromoLoading(true);
-    try {
-      console.log(`📡 [PROMO VERIFICATION] Querying database ledger for voucher code: ${promoInput.toUpperCase().trim()}`);
-      
-      const res = await fetch(
-        `${API_URL}/api/discounts/validate?code=${promoInput.toUpperCase().trim()}&amount=${totals.subtotal}`
+  // ============================================================
+  // RAW ITEM PRICES
+  // ============================================================
+
+  const itemPricingBase = cartItems.map(
+    (item: any, index: number) => {
+      const price = Math.max(
+        0,
+        Number(item?.price ?? 0)
       );
-      const data = await res.json();
-      
-      if (res.ok) {
-        setAppliedPromo(data);
-        Alert.alert(t('success') || "Success", `Promo Code Applied Successfully!`);
-      } else {
-        Alert.alert(t('error') || "Error", data.error || "Invalid promo code or below minimum spend requirement.");
-        setAppliedPromo(null);
+
+      const quantity = Math.max(
+        1,
+        Number(item?.quantity ?? 1)
+      );
+
+      const lineSubtotal =
+        price * quantity;
+
+      return {
+        index,
+        item,
+        price,
+        quantity,
+        lineSubtotal,
+      };
+    }
+  );
+
+
+  // ============================================================
+  // SUBTOTAL
+  // ============================================================
+
+  const subtotal = itemPricingBase.reduce(
+    (sum, item) =>
+      sum + item.lineSubtotal,
+    0
+  );
+
+
+  // ============================================================
+  // FIRST SHOP / NEW USER
+  // ============================================================
+
+  const newUserDiscountActive =
+    settings?.newUserDiscountActive === true ||
+    String(
+      settings?.newUserDiscountActive
+    ).toLowerCase() === 'true' ||
+    Number(
+      settings?.newUserDiscountActive
+    ) === 1;
+
+  const pastOrderCount = Number(
+    cachedUser?.orderCount ??
+    cachedUser?.ordersCount ??
+    cachedUser?.order_count ??
+    cachedUser?.orders_count ??
+    cachedUser?._count?.orders ??
+    cachedUser?._count?.order ??
+    0
+  );
+
+  const maxAllowedPurchases = Number(
+    settings?.newUserMaxPurchaseCount ?? 1
+  );
+
+  let campaignDateValid = true;
+
+  if (settings?.newUserDiscountExpiresAt) {
+    campaignDateValid =
+      new Date() <
+      new Date(
+        settings.newUserDiscountExpiresAt
+      );
+  }
+
+  const isFirstShop =
+    pastOrderCount <
+    maxAllowedPurchases;
+
+  let newUserDiscount = 0;
+
+  const newUserDiscountType =
+    settings?.newUserDiscountType ??
+    'fixed';
+
+  const newUserDiscountValue =
+    Number(
+      settings?.newUserDiscountValue ?? 0
+    );
+
+  if (
+    newUserDiscountActive &&
+    isFirstShop &&
+    campaignDateValid
+  ) {
+    if (
+      newUserDiscountType ===
+      'percentage'
+    ) {
+      newUserDiscount =
+        subtotal *
+        (newUserDiscountValue / 100);
+    } else {
+      newUserDiscount =
+        Math.min(
+          newUserDiscountValue,
+          subtotal
+        );
+    }
+  }
+
+
+  // ============================================================
+  // PROMO
+  // ============================================================
+
+  let promoDiscount = 0;
+
+  const promoIsPercentage =
+    appliedPromo?.type === 'percentage';
+
+  if (appliedPromo) {
+    const promoValue =
+      Number(
+        appliedPromo?.value ?? 0
+      );
+
+    if (promoIsPercentage) {
+      promoDiscount =
+        subtotal *
+        (promoValue / 100);
+    } else {
+      promoDiscount =
+        Math.min(
+          promoValue,
+          subtotal
+        );
+    }
+  }
+
+
+  // ============================================================
+  // MILESTONE
+  // ============================================================
+
+  let rewardDiscount = 0;
+  let earnedGift: string | null = null;
+
+  const hasClaimedReward =
+    cachedUser?.hasClaimedMilestoneReward === true ||
+    String(
+      cachedUser?.hasClaimedMilestoneReward
+    ).toLowerCase() === 'true' ||
+    Number(
+      cachedUser?.hasClaimedMilestoneReward
+    ) === 1;
+
+  const lifetimeSpend = Number(
+    cachedUser?.totalLifetimeSpend ??
+    cachedUser?.total_lifetime_spend ??
+    0
+  );
+
+  const qualifiesByBasket =
+    subtotal >= rewardLimit;
+
+  const qualifiesByHistory =
+    lifetimeSpend >= rewardLimit;
+
+  const qualifiesForReward =
+    (qualifiesByBasket ||
+      qualifiesByHistory) &&
+    !hasClaimedReward;
+
+  if (qualifiesForReward) {
+    if (
+      rewardType === 'discount'
+    ) {
+      rewardDiscount =
+        Math.min(
+          rewardValue,
+          subtotal
+        );
+    } else {
+      earnedGift =
+        String(
+          settings?.rewardValue ??
+          'FREE GIFT'
+        );
+    }
+  }
+
+
+  // ============================================================
+  // PER-ITEM PERCENTAGE DISCOUNTS
+  //
+  // IMPORTANT:
+  // Fixed discounts stay out of this calculation.
+  // ============================================================
+
+  const itemPricing = itemPricingBase.map(
+    (entry) => {
+      let percentageDiscount = 0;
+
+      // --------------------------------------------------------
+      // FIRST SHOP PERCENTAGE
+      // --------------------------------------------------------
+
+      if (
+        newUserDiscount > 0 &&
+        newUserDiscountType ===
+          'percentage'
+      ) {
+        percentageDiscount +=
+          entry.lineSubtotal *
+          (newUserDiscountValue / 100);
       }
-    } catch (e: any) {
-      console.error("❌ Promo validation network drop exception:", e.message);
-      Alert.alert(t('error') || "Error", "Failed to validate promo code. Check your network link indicators.");
+
+      // --------------------------------------------------------
+      // PROMO PERCENTAGE
+      // --------------------------------------------------------
+
+      if (
+        appliedPromo &&
+        promoIsPercentage
+      ) {
+        const promoValue =
+          Number(
+            appliedPromo?.value ?? 0
+          );
+
+        percentageDiscount +=
+          entry.lineSubtotal *
+          (promoValue / 100);
+      }
+
+      // Never discount more than the line itself.
+      percentageDiscount =
+        Math.min(
+          percentageDiscount,
+          entry.lineSubtotal
+        );
+
+      const discountedLineTotal =
+        Math.max(
+          0,
+          entry.lineSubtotal -
+            percentageDiscount
+        );
+
+      const discountedUnitPrice =
+        entry.quantity > 0
+          ? discountedLineTotal /
+            entry.quantity
+          : discountedLineTotal;
+
+      return {
+        ...entry,
+
+        percentageDiscount,
+
+        discountedLineTotal,
+
+        discountedUnitPrice,
+
+        hasDiscount:
+          percentageDiscount > 0,
+
+        originalLineTotal:
+          entry.lineSubtotal,
+      };
+    }
+  );
+
+
+  // ============================================================
+  // TOTAL PERCENTAGE DISCOUNTS
+  // ============================================================
+
+  const itemPercentageDiscount =
+    itemPricing.reduce(
+      (sum, item) =>
+        sum + item.percentageDiscount,
+      0
+    );
+
+
+  // ============================================================
+  // FIXED DISCOUNTS
+  //
+  // These remain order-level.
+  // ============================================================
+
+  const fixedNewUserDiscount =
+    newUserDiscountType ===
+    'fixed'
+      ? newUserDiscount
+      : 0;
+
+  const fixedPromoDiscount =
+    appliedPromo &&
+    !promoIsPercentage
+      ? promoDiscount
+      : 0;
+
+  const fixedRewardDiscount =
+    rewardDiscount;
+
+
+  // ============================================================
+  // TOTAL DISCOUNTS
+  // ============================================================
+
+  const totalDiscount =
+    itemPercentageDiscount +
+    fixedNewUserDiscount +
+    fixedPromoDiscount +
+    fixedRewardDiscount;
+
+
+  // ============================================================
+  // MERCHANDISE AFTER DISCOUNTS
+  // ============================================================
+
+  const merchandiseAfterDiscounts =
+    Math.max(
+      0,
+      subtotal - totalDiscount
+    );
+
+
+  // ============================================================
+  // DELIVERY
+  // ============================================================
+
+  const isFreeShipping =
+    subtotal >= freeDeliveryLimit;
+
+  const shipping =
+    isFreeShipping
+      ? 0
+      : baseDeliveryFee;
+
+
+  // ============================================================
+  // FINAL
+  // ============================================================
+
+  const final = Math.max(
+    0,
+    merchandiseAfterDiscounts +
+      shipping
+  );
+
+
+  // ============================================================
+  // PREPAYMENT
+  // ============================================================
+
+  const requiresPrepayment =
+    final >= prepayLimit;
+
+  const prepayAmount =
+    requiresPrepayment
+      ? Math.ceil(
+          final *
+            (prepayPercentage / 100)
+        )
+      : 0;
+
+
+  // ============================================================
+  // RETURN
+  // ============================================================
+
+  return {
+    subtotal,
+
+    newUserDiscount,
+
+    discount: promoDiscount,
+
+    rewardDiscount,
+
+    gift: earnedGift,
+
+    shipping,
+
+    isFree: isFreeShipping,
+
+    final,
+
+    requiresPrepayment,
+
+    prepayPercent:
+      prepayPercentage,
+
+    prepayAmount,
+
+    triggerMilestoneClaimFlag:
+      qualifiesForReward,
+
+    isFirstShop,
+
+    qualifiesForReward,
+
+    itemPricing,
+
+    itemPercentageDiscount,
+
+    fixedNewUserDiscount,
+
+    fixedPromoDiscount,
+
+    fixedRewardDiscount,
+
+    totalDiscount,
+  };
+}, [
+  cartItems,
+  settings,
+  appliedPromo,
+  cachedUser,
+]);
+  // ============================================================
+  // PROMO VALIDATION
+  // ============================================================
+
+  const handleValidatePromo = async () => {
+    const code = promoInput.trim().toUpperCase();
+
+    if (!code) {
+      Alert.alert(
+        t('error') || 'Error',
+        'Please enter a valid discount code.'
+      );
+      return;
+    }
+
+    setPromoLoading(true);
+
+    try {
+      console.log(
+        `📡 Validating promo code: ${code}`
+      );
+
+      const response = await fetch(
+        `${API_URL}/api/discounts/validate?code=${encodeURIComponent(
+          code
+        )}&amount=${encodeURIComponent(
+          totals.subtotal
+        )}`
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      if (!response.ok) {
+        setAppliedPromo(null);
+
+        Alert.alert(
+          t('error') || 'Error',
+          data?.error ||
+            'Invalid promo code or minimum spend requirement not met.'
+        );
+
+        return;
+      }
+
+      setAppliedPromo(data);
+
+      Alert.alert(
+        t('success') || 'Success',
+        'Promo code applied successfully.'
+      );
+    } catch (error: any) {
+      console.error(
+        '❌ Promo validation failed:',
+        error
+      );
+
+      Alert.alert(
+        t('error') || 'Error',
+        'Unable to validate the promo code. Please check your connection.'
+      );
     } finally {
       setPromoLoading(false);
     }
   };
 
+  // ============================================================
+  // PLACE ORDER
+  // ============================================================
 
-  // 🎯 CORE TRANSACTIONAL ORDER PLACEMENT ACTION HANDLER
   const handlePlaceOrder = async () => {
-    if (!form.name || !form.phone || !form.address) {
-      return Alert.alert(
-        t('requiredFields') || "Required Fields", 
-        t('fillAllDetails') || "Please fill in all information details before submitting."
+    // ----------------------------------------------------------
+    // AUTH
+    // ----------------------------------------------------------
+
+    if (!authenticated) {
+      Alert.alert(
+        t('signInRequiredTitle') ||
+          'Sign In Required',
+        t('signInRequiredBody') ||
+          'Please sign in or create an account before placing an order.',
+        [
+          {
+            text: t('cancel') || 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: t('signIn') || 'Sign In',
+            onPress: () =>
+              router.push('/sign-in'),
+          },
+        ]
       );
+
+      return;
     }
 
-    console.log("🚀 Dispatched custom order transactional request payload to server...");
-    setLoading(true);
+    // ----------------------------------------------------------
+    // FORM VALIDATION
+    // ----------------------------------------------------------
 
-  if (!authenticated) {
+  if (
+  !form.name.trim() ||
+  !form.phone.trim() ||
+  !form.address.trim()
+) {
   Alert.alert(
-    t("signInRequiredTitle") || "Sign In Required",
-    t("signInRequiredBody") ||
-      "Please sign in or create an account before placing an order.",
-    [
-      {
-        text: t("cancel") || "Cancel",
-        style: "cancel",
-      },
-      {
-        text: t("signIn") || "Sign In",
-        onPress: () => router.push("/sign-in"),
-      },
-    ]
+    t('requiredFields') ||
+      'Required Fields',
+    t('fillAllDetails') ||
+      'Please fill in all required information.'
   );
 
   return;
 }
+
+    // ----------------------------------------------------------
+    // CART VALIDATION
+    // ----------------------------------------------------------
+
+    if (!cartItems.length) {
+      Alert.alert(
+        t('error') || 'Error',
+        'Your cart is empty.'
+      );
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // TOKEN
+    // ----------------------------------------------------------
+
+    const token =
+      session?.session?.token;
+
+    if (!token) {
+      Alert.alert(
+        t('error') || 'Error',
+        'Your session has expired. Please sign in again.'
+      );
+
+      return;
+    }
+
+    setLoading(true);
+
     try {
-     const token = session?.session?.token;
+      // --------------------------------------------------------
+      // BUILD EXACT DATABASE ORDER ITEM PAYLOAD
+      // --------------------------------------------------------
 
-const response = await fetch(`${API_URL}/api/orders`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  },
-  body: JSON.stringify({
-    customerName: form.name,
-    phoneNumber: form.phone,
-    address: form.address,
-    latitude: coords[0].toString(),
-    longitude: coords[1].toString(),
-    totalAmount: totals.final.toString(),
-    shippingFee: totals.shipping.toString(),
+      const items = cartItems.map(
+        (item: any) => ({
+          productId: item.id,
+          quantity: Math.max(
+            1,
+            Number(item.quantity ?? 1)
+          ),
+          price: Number(
+            item.price ?? 0
+          ),
+          selectedSize:
+            item.selectedSize || null,
+          selectedColor:
+            item.selectedColor || null,
+        })
+      );
 
-    newUserDiscountApplied: totals.newUserDiscount.toString(),
-    consumesMilestoneRewardFlag: totals.triggerMilestoneClaimFlag,
-    milestoneRewardMarkdownApplied: totals.rewardDiscount.toString(),
+      // --------------------------------------------------------
+      // BUILD EXACT BACKEND ORDER PAYLOAD
+      // --------------------------------------------------------
 
-    promoCode: appliedPromo
-      ? promoInput.toUpperCase().trim()
-      : null,
+const payload = {
+  customerName: form.name.trim(),
 
-    items: cartItems.map(item => ({
-      productId: item.id,
-      quantity: item.quantity,
-      price: item.price.toString(),
-      selectedSize: item.selectedSize || 'M',
-      selectedColor: item.selectedColor || 'Standard'
-    }))
+  phoneNumber: form.phone.trim(),
+
+  whatsappNumber: form.whatsapp.trim(),
+
+  address: form.address.trim(),
+
+  latitude: coords
+    ? String(coords[0])
+    : null,
+
+  longitude: coords
+    ? String(coords[1])
+    : null,
+
+  // =========================================================
+  // ORDER PRICING
+  // =========================================================
+
+  subtotal: Number(
+    totals.subtotal
+  ),
+
+  shippingFee: Number(
+    totals.shipping
+  ),
+
+  promoDiscount: Number(
+    totals.fixedPromoDiscount ?? 0
+  ),
+
+  newUserDiscount: Number(
+    totals.fixedNewUserDiscount ?? 0
+  ),
+
+  milestoneDiscount: Number(
+    totals.fixedRewardDiscount ?? 0
+  ),
+
+  promoCode: appliedPromo
+    ? String(
+        promoInput ||
+        appliedPromo.code ||
+        ''
+      )
+        .trim()
+        .toUpperCase()
+    : null,
+
+  totalAmount: Number(
+    totals.final
+  ),
+
+  // =========================================================
+  // ORDER ITEMS
+  // =========================================================
+
+items: totals.itemPricing.map(
+  (entry: any) => ({
+    ...entry.item,
+
+    quantity: entry.quantity,
+
+    price: Number(
+      entry.discountedUnitPrice
+    ),
+
+    originalPrice: Number(
+      entry.price
+    ),
+
+    discountAmount: Number(
+      entry.percentageDiscount
+    ),
+
+    discountPercentage:
+      entry.price > 0
+        ? Number(
+            (
+              (
+                entry.percentageDiscount /
+                entry.lineSubtotal
+              ) * 100
+            ).toFixed(2)
+          )
+        : 0,
+
+    selectedSize:
+      entry.item.selectedSize,
+
+    selectedColor:
+      entry.item.selectedColor,
   })
-});
+),
+};
+
+      console.log(
+        '🚀 Creating order:',
+        JSON.stringify(
+          payload,
+          null,
+          2
+        )
+      );
+
+      // --------------------------------------------------------
+      // CREATE ORDER
+      // --------------------------------------------------------
+
+      const response = await fetch(
+        `${API_URL}/api/orders`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json',
+
+            Authorization:
+              `Bearer ${token}`,
+          },
+
+          body: JSON.stringify(
+            payload
+          ),
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => ({}));
+
+      // --------------------------------------------------------
+      // SUCCESS
+      // --------------------------------------------------------
 
       if (response.ok) {
-        clearCart(); 
-        Alert.alert(
-          t('success') || "Success", 
-          t('orderPlacedSuccess') || "Your order has been recorded successfully!"
+        console.log(
+          '✅ Order created successfully:',
+          data?.order?.id
         );
+
+        clearCart();
+
+        Alert.alert(
+          t('success') || 'Success',
+          t('orderPlacedSuccess') ||
+            'Your order has been placed successfully.'
+        );
+
         router.replace('/orders');
-      } else {
-        const errPayload = await response.json().catch(() => ({}));
-        Alert.alert(t('error') || "Error", errPayload?.error || "Order placement failed.");
+
+        return;
       }
-    } catch (e) {
-      console.error("❌ Checkout submit execution network drop out:", e);
-      Alert.alert(t('error') || "Error", "Network connection failed. Check your Wi-Fi.");
+
+      // --------------------------------------------------------
+      // BACKEND ERROR
+      // --------------------------------------------------------
+
+      console.error(
+        '❌ Order creation failed:',
+        data
+      );
+
+      Alert.alert(
+        t('error') || 'Error',
+        data?.error ||
+          data?.details ||
+          'Order placement failed.'
+      );
+    } catch (error) {
+      console.error(
+        '🔥 Order submission network error:',
+        error
+      );
+
+      Alert.alert(
+        t('error') || 'Error',
+        'Network connection failed. Please check your internet connection.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const freeDeliveryThreshold = Number(
+  settings?.freeDeliveryThreshold ?? 2000
+);
 
+const freeShippingProgress = Math.min(
+  100,
+  Math.round(
+    (Number(totals.subtotal || 0) /
+      Math.max(1, freeDeliveryThreshold)) *
+      100
+  )
+);
+
+const isFreeDelivery =
+  Number(totals.subtotal || 0) >= freeDeliveryThreshold;
+  // ============================================================
+  // CHECKOUT MAP
+  // ============================================================
 
   const MemoizedMap = useMemo(() => {
     if (!settings) {
       return (
-        <View style={styles.mapLoaderContainer}>
-          <ActivityIndicator size="small" color="#000" />
+        <View
+          style={
+            styles.mapLoaderContainer
+          }
+        >
+          <ActivityIndicator
+            size="small"
+            color="#000"
+          />
         </View>
       );
     }
 
-    const warehouse: [number, number] = [
-      parseFloat(settings?.warehouseLat || settings?.warehouse_lat) || 34.5330,
-      parseFloat(settings?.warehouseLng || settings?.warehouse_lng) || 69.1660
+    const warehouse: [
+      number,
+      number
+    ] = [
+      Number(
+        settings?.warehouseLat ??
+          settings?.warehouse_lat ??
+          34.5330
+      ),
+
+      Number(
+        settings?.warehouseLng ??
+          settings?.warehouse_lng ??
+          69.1660
+      ),
     ];
 
     return (
-      <UnifiedMap 
-        role="USER" 
-        destinationCoords={coords} 
-        warehouseCoords={warehouse} 
-        orderStatus="confirmed" 
+      <UnifiedMap
+        role="USER"
+        destinationCoords={coords}
+        warehouseCoords={warehouse}
+        orderStatus="confirmed"
         orderId="checkout-preview"
       />
     );
   }, [coords, settings]);
+
+  // ============================================================
+  // LOCATION PERMISSION HANDLER
+  // ============================================================
+
+  const handleAllowLocation = async () => {
+    try {
+      setLocationLoading(true);
+
+      console.log(
+        '📍 Starting checkout GPS permission flow...'
+      );
+
+      let permission =
+        await Location.getForegroundPermissionsAsync();
+
+      if (!permission.granted) {
+        permission =
+          await Location.requestForegroundPermissionsAsync();
+
+        console.log(
+          '📍 Permission result:',
+          permission
+        );
+
+        if (!permission.granted) {
+          setShowCustomPermissionModal(
+            false
+          );
+          return;
+        }
+      }
+
+      // Small warm-up delay for cold GPS initialization.
+      await new Promise((resolve) =>
+        setTimeout(resolve, 600)
+      );
+
+      let position = null;
+
+      try {
+        position =
+          await Location.getCurrentPositionAsync(
+            {
+              accuracy:
+                Location.Accuracy.Balanced,
+            }
+          );
+      } catch {
+        console.log(
+          '📍 First GPS attempt failed, retrying...'
+        );
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, 800)
+        );
+
+        position =
+          await Location.getCurrentPositionAsync(
+            {
+              accuracy:
+                Location.Accuracy.High,
+            }
+          );
+      }
+
+      if (!position?.coords) {
+        throw new Error(
+          'GPS coordinates unavailable'
+        );
+      }
+
+      const liveCoords: [
+        number,
+        number
+      ] = [
+        position.coords.latitude,
+        position.coords.longitude,
+      ];
+
+      setCoords(liveCoords);
+      setGpsServicesDisabled(false);
+      setShowCustomPermissionModal(
+        false
+      );
+
+      console.log(
+        '✅ Checkout coordinates updated:',
+        liveCoords
+      );
+    } catch (error) {
+      console.error(
+        '❌ Checkout GPS flow failed:',
+        error
+      );
+
+      Alert.alert(
+        t('error') || 'Error',
+        'Unable to retrieve your location. Please make sure location services are enabled.'
+      );
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
 
 
 return (
@@ -487,37 +1226,121 @@ return (
         >
           <View style={styles.section}>
             {/* 🎯 CLEAN DESIGN UPDATE: Removed the redundant live GPS trigger button tray entirely */}
-            <View style={[styles.sectionHeader]}>
-              <Text style={styles.sectionLabel}>
-                {(t('shippingAddress') || t('deliveryAddress') || 'SHIPPING ADDRESS').toUpperCase()}
-              </Text>
-            </View>
+        <View style={styles.sectionHeader}>
+  <Text style={styles.sectionLabel}>
+    {(
+      t('shippingAddress') ||
+      t('deliveryAddress') ||
+      'SHIPPING ADDRESS'
+    ).toUpperCase()}
+  </Text>
 
-            {/* INPUT FORM FIELDS */}
-                       <TextInput 
-              placeholder={t('fullName') || "FULL NAME"} 
-              placeholderTextColor="#BBBBBB" 
-              style={[styles.input, isRTL && { textAlign: 'right' }]} 
-              value={form.name} 
-              onChangeText={(v) => setForm({...form, name: v})} 
-              autoCapitalize="words"
-            />
-            <TextInput 
-              placeholder={t('phoneNumber') || "PHONE NUMBER"} 
-              placeholderTextColor="#BBBBBB" 
-              style={[styles.input, isRTL && { textAlign: 'right' }]} 
-              keyboardType="phone-pad"
-              value={form.phone} 
-              onChangeText={(v) => setForm({...form, phone: v})} 
-            />
-            <TextInput 
-              placeholder={t('address') || "SHIPPING ADDRESS"} 
-              placeholderTextColor="#BBBBBB" 
-              style={[styles.input, isRTL && { textAlign: 'right' }]} 
-              value={form.address} 
-              onChangeText={(v) => setForm({...form, address: v})} 
-            />
-  
+  <TouchableOpacity
+    style={styles.gpsBtn}
+    onPress={handleAllowLocation}
+    disabled={locationLoading}
+    activeOpacity={0.75}
+  >
+    {locationLoading ? (
+      <ActivityIndicator
+        size="small"
+        color="#000000"
+      />
+    ) : (
+      <Ionicons
+        name="locate-outline"
+        size={17}
+        color="#000000"
+      />
+    )}
+
+    <Text style={styles.gpsBtnText}>
+      {locationLoading
+        ? (t('locating') || 'LOCATING...')
+        : coords
+          ? (t('locationSelected') || 'LOCATION SELECTED')
+          : (t('useMyLocation') || 'USE MY LOCATION')}
+    </Text>
+  </TouchableOpacity>
+</View>
+
+
+<TextInput 
+  placeholder={t('fullName') || "FULL NAME"} 
+  placeholderTextColor="#BBBBBB" 
+  style={[
+    styles.input,
+    isRTL && { textAlign: 'right' }
+  ]} 
+  value={form.name} 
+  onChangeText={(v) =>
+    setForm({
+      ...form,
+      name: v,
+    })
+  } 
+  autoCapitalize="words"
+/>
+
+{/* PHONE */}
+<TextInput 
+  placeholder={t('phoneNumber') || "PHONE NUMBER"} 
+  placeholderTextColor="#BBBBBB" 
+  style={[
+    styles.input,
+    isRTL && { textAlign: 'right' }
+  ]} 
+  keyboardType="phone-pad"
+  value={form.phone} 
+  onChangeText={(v) =>
+    setForm({
+      ...form,
+      phone: v,
+    })
+  } 
+/>
+
+{/* WHATSAPP */}
+<TextInput 
+  placeholder={
+    t('whatsappNumber') ||
+    "WHATSAPP NUMBER"
+  } 
+  placeholderTextColor="#BBBBBB" 
+  style={[
+    styles.input,
+    isRTL && { textAlign: 'right' }
+  ]} 
+  keyboardType="phone-pad"
+  value={form.whatsapp} 
+  onChangeText={(v) =>
+    setForm({
+      ...form,
+      whatsapp: v,
+    })
+  } 
+/>
+
+{/* ADDRESS */}
+<TextInput 
+  placeholder={
+    t('address') ||
+    "SHIPPING ADDRESS"
+  } 
+  placeholderTextColor="#BBBBBB" 
+  style={[
+    styles.input,
+    isRTL && { textAlign: 'right' }
+  ]} 
+  value={form.address} 
+  onChangeText={(v) =>
+    setForm({
+      ...form,
+      address: v,
+    })
+  } 
+/>
+</View>
                    {/* 🎯 MULTILINGUAL CHECKOUT CARGO MANIFEST RENDERING (EXACT MATCH ADJUSTMENT) */}
             <View style={styles.checkoutItemsManifestWrapper}>
               <Text style={[styles.manifestSectionHeading, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]}>
@@ -605,128 +1428,1062 @@ return (
     </View>
   );
 })}
-       {/* ========================================================================= */}
-    {/* 🎯 THE NUMERAL TRANSLATOR CONFACTOR ENGINE & BILLING LEDGER */}
-    {/* ========================================================================= */}
-    {(() => {
-      // COMPONENT-LEVEL STABLE NUMERAL ENGINE:
-      // Converts price digits into localized Eastern Arabic numbers (۰-۹) dynamically
-      // based on the consumer's active layout choice (Pashto, Dari, or English).
-      const toLocalNumbers = (num: string | number) => {
-        const str = Math.ceil(Number(num || 0)).toLocaleString('en-US');
-        if (locale === 'en' || !locale) return str;
-        const easternDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-        return str.replace(/[0-9]/g, (w) => easternDigits[parseInt(w, 10)]);
-      };
 
-      return (
-        <View style={{ width: '100%', marginTop: 20 }}>
-          
-          {/* PROMO VOUCHERS INPUT STRIP */}
-          <Text style={[styles.subSectionLabel, isRTL && { textAlign: 'right' }]}>
-            {(t('discountPromoCode') || 'DISCOUNT PROMO CODE').toUpperCase()}
-          </Text>
-          
-          <View style={[styles.promoRow, isRTL && { flexDirection: 'row-reverse' }]}>
-            <TextInput 
-              placeholder={t('enterCode') || "ENTER CODE"} 
-              placeholderTextColor="#BBBBBB" 
-              autoCapitalize="characters" 
-              style={[styles.promoInput, isRTL && { textAlign: 'right' }]} 
-              value={promoInput} 
-              onChangeText={setPromoInput} 
-              editable={!appliedPromo} 
+
+   {/* ================================================================ */}
+{/* CHECKOUT PRICING / SHEIN-STYLE PRODUCT PRICING                   */}
+{/* ================================================================ */}
+
+{(() => {
+  const toLocalNumbers = (
+    num: string | number
+  ) => {
+    const str = Math.ceil(
+      Number(num || 0)
+    ).toLocaleString('en-US');
+
+    if (locale === 'en' || !locale) {
+      return str;
+    }
+
+    const easternDigits = [
+      '۰',
+      '۱',
+      '۲',
+      '۳',
+      '۴',
+      '۵',
+      '۶',
+      '۷',
+      '۸',
+      '۹',
+    ];
+
+    return str.replace(
+      /[0-9]/g,
+      (w) =>
+        easternDigits[
+          parseInt(w, 10)
+        ]
+    );
+  };
+
+  const money = (
+    amount: number
+  ) =>
+    isRTL
+      ? `${toLocalNumbers(amount)} ${
+          t('afnCurrency') ||
+          'افغانۍ'
+        }`
+      : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(amount)}`;
+
+  return (
+    <View
+      style={[
+        styles.checkoutPricingContainer,
+        isRTL && {
+          alignItems: 'stretch',
+        },
+      ]}
+    >
+
+      {/* ========================================================== */}
+      {/* PROMO CODE                                                  */}
+      {/* ========================================================== */}
+
+      <View style={styles.promoSection}>
+        <Text
+          style={[
+            styles.subSectionLabel,
+            isRTL && {
+              textAlign: 'right',
+            },
+          ]}
+        >
+          {(
+            t('discountPromoCode') ||
+            'DISCOUNT PROMO CODE'
+          ).toUpperCase()}
+        </Text>
+
+        <View
+          style={[
+            styles.promoRow,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <TextInput
+            placeholder={
+              t('enterCode') ||
+              'ENTER CODE'
+            }
+            placeholderTextColor="#AAAAAA"
+            autoCapitalize="characters"
+            value={promoInput}
+            onChangeText={(value) => {
+              setPromoInput(
+                value.toUpperCase()
+              );
+
+              if (appliedPromo) {
+                setAppliedPromo(null);
+              }
+            }}
+            editable={!promoLoading}
+            style={[
+              styles.promoInput,
+              isRTL && {
+                textAlign: 'right',
+              },
+            ]}
+          />
+
+          <TouchableOpacity
+            style={[
+              styles.promoApplyBtn,
+              appliedPromo &&
+                styles.promoAppliedBtn,
+            ]}
+            onPress={
+              handleValidatePromo
+            }
+            disabled={
+              promoLoading ||
+              !!appliedPromo
+            }
+            activeOpacity={0.85}
+          >
+            {promoLoading ? (
+              <ActivityIndicator
+                size="small"
+                color="#FFFFFF"
+              />
+            ) : (
+              <Text
+                style={
+                  styles.promoApplyText
+                }
+              >
+                {appliedPromo
+                  ? t('applied') ||
+                    'APPLIED'
+                  : t('apply') ||
+                    'APPLY'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {appliedPromo && (
+          <View
+            style={[
+              styles.appliedPromoCard,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Ionicons
+              name="pricetag"
+              size={16}
+              color="#16A34A"
             />
-            <TouchableOpacity 
-              style={[styles.promoApplyBtn, appliedPromo && { backgroundColor: '#22C55E' }]} 
-              onPress={handleValidatePromo} 
-              disabled={promoLoading || !!appliedPromo}
-              activeOpacity={0.8}
+
+            <View
+              style={[
+                styles.appliedPromoContent,
+                isRTL && {
+                  alignItems:
+                    'flex-end',
+                },
+              ]}
             >
-              {promoLoading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.promoApplyText}>
-                  {appliedPromo ? (t('applied') || "APPLIED") : (t('apply') || "APPLY")}
-                </Text>
-              )}
+              <Text
+                style={[
+                  styles.appliedPromoCode,
+                  isRTL && {
+                    textAlign: 'right',
+                  },
+                ]}
+              >
+                {promoInput.toUpperCase()}
+              </Text>
+
+              <Text
+                style={[
+                  styles.appliedPromoDescription,
+                  isRTL && {
+                    textAlign: 'right',
+                  },
+                ]}
+              >
+                {appliedPromo.type ===
+                'percentage'
+                  ? `${appliedPromo.value}% ${
+                      t('discount') ||
+                      'discount'
+                    }`
+                  : `${money(
+                      Number(
+                        appliedPromo.value
+                      )
+                    )} ${
+                      t('discount') ||
+                      'discount'
+                    }`}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                setAppliedPromo(
+                  null
+                );
+                setPromoInput('');
+              }}
+              hitSlop={{
+                top: 10,
+                bottom: 10,
+                left: 10,
+                right: 10,
+              }}
+            >
+              <Ionicons
+                name="close-circle"
+                size={20}
+                color="#999999"
+              />
             </TouchableOpacity>
           </View>
+        )}
+      </View>
 
-          {/* 🎯 THE DISCOUNTS BADGE CARD WITH MATCHING CLOSING VIEWS */}
-          {totals.newUserDiscount > 0 && (
-            <View style={styles.newUserIncentiveBadgeCard}>
-              <View style={[styles.alertHeaderRow, isRTL && { flexDirection: 'row-reverse' }]}>
-                <Ionicons name="sparkles-sharp" size={16} color="#000000" style={isRTL ? { marginLeft: 6 } : { marginRight: 6 }} />
-                <Text style={[styles.newUserIncentiveTitleText, isRTL && { textAlign: 'right' }]}>
-                  {(t('welcomeBonusUnlocked') || 'WELCOME BONUS INSTANTLY UNLOCKED').toUpperCase()}
-                </Text>
-              </View>
-              <Text style={[styles.newUserIncentiveBodyText, isRTL && { textAlign: 'right' }]}>
-                {(t('welcomeBonusDesc') || 'As a verified new member, an automatic markdown of AFN {{amount}} has been successfully subtracted from your final collect statement balance!').replace('{{amount}}', toLocalNumbers(totals.newUserDiscount))}
-              </Text>
-            </View>
-          )}
 
-          {/* BILLING LEDGER BOX PANEL AREA */}
-          <View style={{ marginTop: 16 }}>
-            {totals.discount > 0 && (
-              <View style={[styles.billingRow, isRTL && { flexDirection: 'row-reverse' }]}>
-                <Text style={[styles.billLabel, { color: '#FF3B30', fontWeight: '700' }]}>
-                  {t('promoMarkdown') || 'Promo Code Markdown'}
-                </Text>
-                <Text style={[styles.billValue, { color: '#FF3B30', fontWeight: '700' }]}>
-                  - {isRTL ? `${toLocalNumbers(totals.discount)} افغانۍ` : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(totals.discount)}`}
-                </Text>
-              </View>
+      {/* ========================================================== */}
+      {/* PRODUCT PRICING                                            */}
+      {/* ========================================================== */}
+
+      <View style={styles.productDiscountSection}>
+
+        <View
+          style={[
+            styles.productDiscountHeader,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.productDiscountTitle,
+              isRTL && {
+                textAlign: 'right',
+              },
+            ]}
+          >
+            {(
+              t('items') ||
+              'ITEMS'
+            ).toUpperCase()}
+          </Text>
+
+          <Text
+            style={[
+              styles.productDiscountCount,
+              isRTL && {
+                textAlign: 'right',
+              },
+            ]}
+          >
+            {toLocalNumbers(
+              cartItems.length
             )}
+          </Text>
+        </View>
 
-            {totals.rewardDiscount > 0 && (
-              <View style={[styles.billingRow, isRTL && { flexDirection: 'row-reverse' }]}>
-                <Text style={[styles.billLabel, { color: '#22C55E', fontWeight: '700' }]}>
-                  {t('milestoneReward') || 'Milestone Spend Reward'}
-                </Text>
-                <Text style={[styles.billValue, { color: '#22C55E', fontWeight: '700' }]}>
-                  - {isRTL ? `${toLocalNumbers(totals.rewardDiscount)} افغانۍ` : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(totals.rewardDiscount)}`}
-                </Text>
+
+        {totals.itemPricing.map(
+          (pricing: any, index: number) => {
+
+            const item =
+              pricing.item;
+
+            const product =
+              hydratedProductsMap[
+                String(
+                  item.id
+                ).trim()
+              ] ||
+              item.product ||
+              item;
+
+            const displayName =
+              locale === 'ps'
+                ? (
+                    product.namePs ||
+                    product.name_ps ||
+                    product.name
+                  )
+                : locale === 'fa'
+                  ? (
+                      product.nameFa ||
+                      product.name_fa ||
+                      product.name
+                    )
+                  : product.name;
+
+            const hasPercentageDiscount =
+              pricing.percentageDiscount >
+              0;
+
+            const originalPrice =
+              pricing.originalLineTotal;
+
+            const discountedPrice =
+              pricing.discountedLineTotal;
+
+            const localizedDiscount =
+              hasPercentageDiscount
+                ? (
+                    (
+                      pricing.percentageDiscount /
+                      Math.max(
+                        1,
+                        originalPrice
+                      )
+                    ) * 100
+                  )
+                : 0;
+
+            return (
+              <View
+                key={`pricing-${item.id}-${index}`}
+                style={[
+                  styles.discountProductCard,
+                  isRTL && {
+                    flexDirection:
+                      'row-reverse',
+                  },
+                ]}
+              >
+
+                {/* IMAGE */}
+
+                <Image
+                  source={{
+                    uri:
+                      item.imageUrl ||
+                      product.imageUrl,
+                  }}
+                  style={
+                    styles.discountProductImage
+                  }
+                  resizeMode="cover"
+                />
+
+
+                {/* DETAILS */}
+
+                <View
+                  style={[
+                    styles.discountProductInfo,
+                    isRTL && {
+                      alignItems:
+                        'flex-end',
+                    },
+                  ]}
+                >
+
+                  <Text
+                    style={[
+                      styles.discountProductName,
+                      isRTL && {
+                        textAlign:
+                          'right',
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {(
+                      displayName ||
+                      ''
+                    ).toUpperCase()}
+                  </Text>
+
+
+                  <Text
+                    style={[
+                      styles.discountProductMeta,
+                      isRTL && {
+                        textAlign:
+                          'right',
+                      },
+                    ]}
+                  >
+                    {t('qty') ||
+                      'QTY'}:{' '}
+                    {toLocalNumbers(
+                      pricing.quantity
+                    )}
+                  </Text>
+
+
+                  {/* PRICE */}
+
+                  <View
+                    style={[
+                      styles.discountProductPriceRow,
+                      isRTL && {
+                        flexDirection:
+                          'row-reverse',
+                      },
+                    ]}
+                  >
+
+                    {hasPercentageDiscount && (
+                      <Text
+                        style={
+                          styles.discountOriginalPrice
+                        }
+                      >
+                        {money(
+                          originalPrice
+                        )}
+                      </Text>
+                    )}
+
+                    <Text
+                      style={[
+                        styles.discountFinalPrice,
+                        isRTL && {
+                          textAlign:
+                            'right',
+                        },
+                      ]}
+                    >
+                      {money(
+                        discountedPrice
+                      )}
+                    </Text>
+
+                  </View>
+
+
+                  {/* DISCOUNT BADGE */}
+
+                  {hasPercentageDiscount && (
+                    <View
+                      style={[
+                        styles.productDiscountBadge,
+                        isRTL && {
+                          flexDirection:
+                            'row-reverse',
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name="pricetag"
+                        size={12}
+                        color="#16A34A"
+                      />
+
+                      <Text
+                        style={
+                          styles.productDiscountBadgeText
+                        }
+                      >
+                        {`-${toLocalNumbers(
+                          Math.round(
+                            localizedDiscount
+                          )
+                        )}% `}
+                        {t(
+                          'discount'
+                        ) ||
+                          'OFF'}
+                      </Text>
+                    </View>
+                  )}
+
+                </View>
               </View>
+            );
+          }
+        )}
+      </View>
+
+
+      {/* ========================================================== */}
+      {/* ORDER SUMMARY                                               */}
+      {/* ========================================================== */}
+
+      <View
+        style={styles.billingCard}
+      >
+
+        <Text
+          style={[
+            styles.billingCardTitle,
+            isRTL && {
+              textAlign:
+                'right',
+            },
+          ]}
+        >
+          {(
+            t('orderSummary') ||
+            'ORDER SUMMARY'
+          ).toUpperCase()}
+        </Text>
+
+
+        {/* SUBTOTAL */}
+
+        <View
+          style={[
+            styles.billingRow,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <Text
+            style={styles.billLabel}
+          >
+            {t('subtotal') ||
+              'Subtotal'}
+          </Text>
+
+          <Text
+            style={styles.billValue}
+          >
+            {money(
+              totals.subtotal
             )}
+          </Text>
+        </View>
 
-            {totals.newUserDiscount > 0 && (
-              <View style={[styles.billingRow, isRTL && { flexDirection: 'row-reverse' }]}>
-                <Text style={[styles.billLabel, { color: '#000000', fontWeight: '700' }]}>
-                  {t('welcomeBonusLabel') || 'Welcome Incentive Credit'}
-                </Text>
-                <Text style={[styles.billValue, { color: '#000000', fontWeight: '700' }]}>
-                  - {isRTL ? `${toLocalNumbers(totals.newUserDiscount)} افغانۍ` : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(totals.newUserDiscount)}`}
-                </Text>
-              </View>
-            )}
 
-            <View style={[styles.billingRow, isRTL && { flexDirection: 'row-reverse' }]}>
-              <Text style={styles.billLabel}>{t('shippingFreight') || 'Logistics Shipping Freight'}</Text>
-              <Text style={[styles.billValue, totals.shipping === 0 && { color: '#22C55E', fontWeight: '900' }]}>
-                {totals.shipping === 0 ? (t('freeShipping') || "FREE SHIPPING").toUpperCase() : (isRTL ? `${toLocalNumbers(totals.shipping)} افغانۍ` : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(totals.shipping)}`)}
-              </Text>
-            </View>
+        {/* PRODUCT PERCENTAGE SAVINGS */}
 
-            <View style={styles.dividerLine} />
+        {totals.itemPercentageDiscount >
+          0 && (
+          <View
+            style={[
+              styles.billingRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.discountBillLabel
+              }
+            >
+              {t(
+                'productDiscount'
+              ) ||
+                'Product Discounts'}
+            </Text>
 
-            <View style={[styles.totalRowSplit, isRTL && { flexDirection: 'row-reverse' }]}>
-              <Text style={styles.grandTotalLabel}>{(t('totalPayable') || 'TOTAL PAYABLE').toUpperCase()}</Text>
-              <Text style={styles.grandTotalValue}>
-                {isRTL ? `${toLocalNumbers(totals.final)} افغانۍ` : `${t('afnCurrency') || 'AFN'} ${toLocalNumbers(totals.final)}`}
-              </Text>
-            </View>
+            <Text
+              style={
+                styles.discountBillValue
+              }
+            >
+              -{money(
+                totals.itemPercentageDiscount
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        {/* FIXED FIRST-SHOP DISCOUNT */}
+
+        {totals.fixedNewUserDiscount >
+          0 && (
+          <View
+            style={[
+              styles.billingRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.discountBillLabel
+              }
+            >
+              {t(
+                'welcomeBonusLabel'
+              ) ||
+                'Welcome Bonus'}
+            </Text>
+
+            <Text
+              style={
+                styles.discountBillValue
+              }
+            >
+              -{money(
+                totals.fixedNewUserDiscount
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        {/* FIXED PROMO */}
+
+        {totals.fixedPromoDiscount >
+          0 && (
+          <View
+            style={[
+              styles.billingRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.discountBillLabel
+              }
+            >
+              {t(
+                'promoMarkdown'
+              ) ||
+                'Promo Discount'}
+            </Text>
+
+            <Text
+              style={
+                styles.discountBillValue
+              }
+            >
+              -{money(
+                totals.fixedPromoDiscount
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        {/* MILESTONE */}
+
+        {totals.fixedRewardDiscount >
+          0 && (
+          <View
+            style={[
+              styles.billingRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.discountBillLabel
+              }
+            >
+              {t(
+                'milestoneReward'
+              ) ||
+                'Milestone Reward'}
+            </Text>
+
+            <Text
+              style={
+                styles.discountBillValue
+              }
+            >
+              -{money(
+                totals.fixedRewardDiscount
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        {/* DELIVERY */}
+
+        <View
+          style={[
+            styles.billingRow,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <Text
+            style={styles.billLabel}
+          >
+            {t(
+              'shippingFreight'
+            ) || 'Delivery'}
+          </Text>
+
+          <Text
+            style={[
+              styles.billValue,
+              totals.shipping ===
+                0 &&
+                styles.freeShippingValue,
+            ]}
+          >
+            {totals.shipping ===
+            0
+              ? (
+                  t(
+                    'freeShipping'
+                  ) ||
+                  'FREE'
+                )
+              : money(
+                  totals.shipping
+                )}
+          </Text>
+        </View>
+
+
+        <View
+          style={styles.dividerLine}
+        />
+
+
+        {/* TOTAL SAVINGS */}
+
+        {totals.totalDiscount >
+          0 && (
+          <View
+            style={[
+              styles.totalSavingsRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.totalSavingsLabel
+              }
+            >
+              {t('youSave') ||
+                'YOU SAVE'}
+            </Text>
+
+            <Text
+              style={
+                styles.totalSavingsValue
+              }
+            >
+              -{money(
+                totals.totalDiscount
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        {/* FINAL */}
+
+        <View
+          style={[
+            styles.totalRowSplit,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.totalLabelContainer,
+              isRTL && {
+                alignItems:
+                  'flex-end',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.grandTotalLabel
+              }
+            >
+              {(
+                t(
+                  'totalPayable'
+                ) ||
+                'TOTAL PAYABLE'
+              ).toUpperCase()}
+            </Text>
           </View>
 
-          {/* Content spacer block to prevent sticky footer overflows */}
-          <View style={{ height: 110 }} />
-       
+          <Text
+            style={
+              styles.grandTotalValue
+            }
+          >
+            {money(
+              totals.final
+            )}
+          </Text>
         </View>
-      );
-    })()}
+
+      </View>
+
+
+      {/* ========================================================== */}
+      {/* PREPAYMENT                                                  */}
+      {/* ========================================================== */}
+
+      {totals.requiresPrepayment && (
+        <View
+          style={
+            styles.prepaymentCard
+          }
+        >
+          <View
+            style={[
+              styles.prepaymentHeader,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Ionicons
+              name="card-outline"
+              size={19}
+              color="#111111"
+            />
+
+            <Text
+              style={[
+                styles.prepaymentTitle,
+                isRTL && {
+                  textAlign:
+                    'right',
+                },
+              ]}
+            >
+              {(
+                t(
+                  'prepaymentRequired'
+                ) ||
+                'PREPAYMENT REQUIRED'
+              ).toUpperCase()}
+            </Text>
+          </View>
+
+          <Text
+            style={[
+              styles.prepaymentDescription,
+              isRTL && {
+                textAlign:
+                  'right',
+              },
+            ]}
+          >
+            {(
+              t(
+                'prepaymentDescription'
+              ) ||
+              'This order requires a {{percentage}}% prepayment.'
+            ).replace(
+              '{{percentage}}',
+              String(
+                totals.prepayPercent
+              )
+            )}
+          </Text>
+
+          <View
+            style={[
+              styles.prepaymentAmountRow,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Text
+              style={
+                styles.prepaymentAmountLabel
+              }
+            >
+              {t(
+                'prepaymentAmount'
+              ) ||
+                'PREPAYMENT'}
+            </Text>
+
+            <Text
+              style={
+                styles.prepaymentAmount
+              }
+            >
+              {money(
+                totals.prepayAmount
+              )}
+            </Text>
+          </View>
+        </View>
+      )}
+
+
+      {/* ========================================================== */}
+      {/* FREE SHIPPING                                               */}
+      {/* ========================================================== */}
+
+      {!totals.isFree && (
+        <View
+          style={[
+            styles.shippingProgressCard,
+            isRTL && {
+              alignItems:
+                'flex-end',
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.shippingProgressHeader,
+              isRTL && {
+                flexDirection:
+                  'row-reverse',
+              },
+            ]}
+          >
+            <Ionicons
+              name="bicycle"
+              size={18}
+              color="#111111"
+            />
+
+            <Text
+              style={[
+                styles.shippingProgressTitle,
+                isRTL && {
+                  textAlign:
+                    'right',
+                },
+              ]}
+            >
+              {(
+                t(
+                  'freeShippingProgress'
+                ) ||
+                'FREE SHIPPING PROGRESS'
+              ).toUpperCase()}
+            </Text>
+          </View>
+
+          <View
+            style={styles.progressTrack}
+          >
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${Math.min(
+                    100,
+                    (
+                      totals.subtotal /
+                      Math.max(
+                        1,
+                        Number(
+                          settings?.freeDeliveryThreshold ??
+                            2000
+                        )
+                      )
+                    ) *
+                      100
+                  )}%`,
+                },
+              ]}
+            />
+          </View>
+
+        <Text
+  style={[
+    styles.progressRemaining,
+    isRTL && {
+      textAlign: 'right',
+    },
+  ]}
+>
+  {freeShippingProgress}%{' '}
+  {t('freeShippingProgressComplete') ||
+    'to free delivery'}
+</Text>
+        </View>
+      )}
+
+
+      {totals.isFree && (
+        <View
+          style={[
+            styles.freeShippingCard,
+            isRTL && {
+              flexDirection:
+                'row-reverse',
+            },
+          ]}
+        >
+          <View
+            style={
+              styles.freeShippingIcon
+            }
+          >
+            <Ionicons
+              name="checkmark"
+              size={17}
+              color="#FFFFFF"
+            />
+          </View>
+
+          <Text
+            style={[
+              styles.freeShippingText,
+              isRTL && {
+                textAlign:
+                  'right',
+              },
+            ]}
+          >
+            {t(
+              'freeShippingUnlocked'
+            ) ||
+              'FREE DELIVERY UNLOCKED'}
+          </Text>
+        </View>
+      )}
+
+
+      <View
+        style={{ height: 125 }}
+      />
+
     </View>
+  );
+})()}
 
     {/* ========================================================================= */}
     {/* 📍 ZERO-JANK LOCATION PERMISSION MODAL */}
@@ -806,6 +2563,7 @@ return (
 
           </View>
         </ScrollView>
+        
            <View style={styles.stickyFooter}>
             <TouchableOpacity 
               style={[styles.orderBtn, loading && { opacity: 0.7 }]} 
@@ -824,11 +2582,14 @@ return (
           </View>
 
       </View>
+
+
     </KeyboardAvoidingView>
 
     {/* 🎯 APPMARKET COMPLIANT TRANSPARENT SYSTEM RATIONALE OVERLAY MODAL */}
-
-    </View>
+</View>
+   
+    
   );
 }
 
@@ -838,6 +2599,624 @@ const styles = StyleSheet.create({
   flex: 1,
   backgroundColor: '#FFFFFF'
 },
+
+  // ================================================================
+  // CHECKOUT PRICING & DISCOUNT SYSTEM
+  // ================================================================
+
+  pricingSection: {
+    width: '100%',
+    marginTop: 20,
+  },
+
+  promoSection: {
+    width: '100%',
+    marginBottom: 4,
+  },
+
+  promoAppliedBtn: {
+    backgroundColor: '#16A34A',
+  },
+
+  appliedPromoCard: {
+    width: '100%',
+    minHeight: 58,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    marginBottom: 14,
+    gap: 10,
+  },
+
+  appliedPromoContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+
+  appliedPromoCode: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#15803D',
+    letterSpacing: 1,
+  },
+
+  appliedPromoDescription: {
+    fontSize: 10,
+    color: '#4B5563',
+    fontWeight: '500',
+    marginTop: 3,
+  },
+
+  // ================================================================
+  // WELCOME BONUS
+  // ================================================================
+
+  discountHighlightCard: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 4,
+    marginBottom: 14,
+  },
+
+  discountHighlightHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+
+  discountIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#111111',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  discountHighlightTitle: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#111111',
+    letterSpacing: 1,
+  },
+
+  checkoutPricingContainer: {
+  width: '100%',
+  marginTop: 20,
+},
+
+/* ============================================================= */
+/* PRODUCT DISCOUNT SECTION                                      */
+/* ============================================================= */
+
+productDiscountSection: {
+  width: '100%',
+  marginTop: 8,
+  marginBottom: 18,
+},
+
+productDiscountHeader: {
+  width: '100%',
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: 10,
+  paddingHorizontal: 2,
+},
+
+productDiscountTitle: {
+  fontSize: 13,
+  fontWeight: '800',
+  letterSpacing: 0.7,
+  color: '#111111',
+},
+
+productDiscountCount: {
+  fontSize: 12,
+  fontWeight: '600',
+  color: '#888888',
+},
+
+/* ============================================================= */
+/* INDIVIDUAL PRODUCT                                            */
+/* ============================================================= */
+
+discountProductCard: {
+  width: '100%',
+  minHeight: 94,
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#FFFFFF',
+  borderWidth: 1,
+  borderColor: '#EEEEEE',
+  borderRadius: 14,
+  padding: 10,
+  marginBottom: 9,
+},
+
+discountProductImage: {
+  width: 72,
+  height: 84,
+  borderRadius: 10,
+  backgroundColor: '#F4F4F4',
+},
+
+discountProductInfo: {
+  flex: 1,
+  minWidth: 0,
+  marginLeft: 12,
+  justifyContent: 'center',
+},
+
+discountProductName: {
+  width: '100%',
+  fontSize: 13,
+  fontWeight: '700',
+  color: '#171717',
+  marginBottom: 5,
+},
+
+discountProductMeta: {
+  fontSize: 11,
+  fontWeight: '500',
+  color: '#8A8A8A',
+  marginBottom: 7,
+},
+
+discountProductPriceRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 7,
+},
+
+discountOriginalPrice: {
+  fontSize: 11,
+  fontWeight: '500',
+  color: '#999999',
+  textDecorationLine: 'line-through',
+},
+
+discountFinalPrice: {
+  fontSize: 15,
+  fontWeight: '800',
+  color: '#111111',
+},
+
+productDiscountBadge: {
+  alignSelf: 'flex-start',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 4,
+  marginTop: 5,
+  paddingHorizontal: 7,
+  paddingVertical: 3,
+  borderRadius: 5,
+  backgroundColor: '#ECFDF3',
+},
+
+productDiscountBadgeText: {
+  fontSize: 10,
+  fontWeight: '800',
+  color: '#16A34A',
+},
+
+/* ============================================================= */
+/* BILLING                                                        */
+/* ============================================================= */
+
+billingCard: {
+  width: '100%',
+  backgroundColor: '#FFFFFF',
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: '#EAEAEA',
+  padding: 16,
+  marginTop: 6,
+},
+
+billingCardTitle: {
+  fontSize: 14,
+  fontWeight: '800',
+  letterSpacing: 0.5,
+  color: '#111111',
+  marginBottom: 15,
+},
+
+billingRow: {
+  width: '100%',
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  minHeight: 32,
+},
+
+billLabel: {
+  fontSize: 13,
+  fontWeight: '500',
+  color: '#666666',
+},
+
+billValue: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: '#222222',
+},
+
+discountBillLabel: {
+  fontSize: 13,
+  fontWeight: '600',
+  color: '#16A34A',
+},
+
+discountBillValue: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: '#16A34A',
+},
+
+freeShippingValue: {
+  color: '#16A34A',
+  fontWeight: '800',
+},
+
+dividerLine: {
+  width: '100%',
+  height: 1,
+  backgroundColor: '#EEEEEE',
+  marginVertical: 12,
+},
+
+/* ============================================================= */
+/* TOTAL SAVINGS                                                  */
+/* ============================================================= */
+
+totalSavingsRow: {
+  width: '100%',
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 10,
+},
+
+totalSavingsLabel: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: '#16A34A',
+},
+
+totalSavingsValue: {
+  fontSize: 12,
+  fontWeight: '800',
+  color: '#16A34A',
+},
+
+totalRowSplit: {
+  width: '100%',
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  paddingTop: 4,
+},
+
+totalLabelContainer: {
+  flex: 1,
+},
+
+grandTotalLabel: {
+  fontSize: 14,
+  fontWeight: '900',
+  letterSpacing: 0.4,
+  color: '#111111',
+},
+
+grandTotalValue: {
+  fontSize: 21,
+  fontWeight: '900',
+  color: '#111111',
+},
+
+/* ============================================================= */
+/* PREPAYMENT                                                     */
+/* ============================================================= */
+
+prepaymentCard: {
+  width: '100%',
+  marginTop: 12,
+  padding: 16,
+  borderRadius: 15,
+  borderWidth: 1,
+  borderColor: '#E5E5E5',
+  backgroundColor: '#FAFAFA',
+},
+
+prepaymentHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  marginBottom: 8,
+},
+
+prepaymentTitle: {
+  flex: 1,
+  fontSize: 13,
+  fontWeight: '800',
+  color: '#111111',
+  letterSpacing: 0.4,
+},
+
+prepaymentDescription: {
+  fontSize: 12,
+  lineHeight: 18,
+  color: '#777777',
+  marginBottom: 13,
+},
+
+prepaymentAmountRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingTop: 11,
+  borderTopWidth: 1,
+  borderTopColor: '#E8E8E8',
+},
+
+prepaymentAmountLabel: {
+  fontSize: 12,
+  fontWeight: '700',
+  color: '#666666',
+},
+
+prepaymentAmount: {
+  fontSize: 17,
+  fontWeight: '900',
+  color: '#111111',
+},
+
+/* ============================================================= */
+/* PROMO                                                          */
+/* ============================================================= */
+
+
+
+subSectionLabel: {
+  fontSize: 12,
+  fontWeight: '800',
+  letterSpacing: 0.5,
+  color: '#333333',
+  marginBottom: 9,
+},
+
+promoRow: {
+  width: '100%',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+},
+
+promoInput: {
+  flex: 1,
+  height: 46,
+  borderWidth: 1,
+  borderColor: '#DDDDDD',
+  borderRadius: 10,
+  paddingHorizontal: 13,
+  fontSize: 13,
+  color: '#111111',
+  backgroundColor: '#FFFFFF',
+},
+
+promoApplyBtn: {
+  height: 46,
+  minWidth: 82,
+  paddingHorizontal: 15,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#111111',
+},
+
+/* ============================================================= */
+/* SHIPPING                                                       */
+/* ============================================================= */
+
+shippingProgressCard: {
+  width: '100%',
+  marginTop: 12,
+  padding: 15,
+  borderRadius: 14,
+  backgroundColor: '#F8F8F8',
+},
+
+shippingProgressHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  marginBottom: 12,
+},
+
+shippingProgressTitle: {
+  flex: 1,
+  fontSize: 12,
+  fontWeight: '800',
+  color: '#222222',
+},
+
+progressTrack: {
+  width: '100%',
+  height: 6,
+  borderRadius: 999,
+  overflow: 'hidden',
+  backgroundColor: '#E3E3E3',
+},
+
+progressFill: {
+  height: '100%',
+  borderRadius: 999,
+  backgroundColor: '#111111',
+},
+
+progressRemaining: {
+  marginTop: 8,
+  fontSize: 11,
+  color: '#777777',
+},
+
+freeShippingCard: {
+  width: '100%',
+  marginTop: 12,
+  padding: 14,
+  borderRadius: 14,
+  backgroundColor: '#F0FDF4',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 9,
+},
+
+freeShippingIcon: {
+  width: 25,
+  height: 25,
+  borderRadius: 13,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#16A34A',
+},
+
+freeShippingText: {
+  flex: 1,
+  fontSize: 12,
+  fontWeight: '800',
+  color: '#166534',
+},
+
+  discountHighlightDescription: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#4B5563',
+    fontWeight: '500',
+    marginTop: 10,
+  },
+
+  discountSavedRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+
+  discountSavedLabel: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#6B7280',
+    letterSpacing: 1,
+  },
+
+  discountSavedAmount: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#16A34A',
+  },
+
+  // ================================================================
+  // MILESTONE REWARD
+  // ================================================================
+
+  rewardCard: {
+    width: '100%',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+  },
+
+  rewardHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  rewardTitle: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#15803D',
+    letterSpacing: 1,
+  },
+
+  rewardDescription: {
+    fontSize: 11,
+    lineHeight: 17,
+    color: '#166534',
+    fontWeight: '500',
+    marginTop: 9,
+  },
+
+  rewardAmountRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#DCFCE7',
+  },
+
+  rewardAmountLabel: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#15803D',
+    letterSpacing: 1,
+  },
+
+  rewardAmount: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#16A34A',
+  },
+
+
+  totalSavingsText: {
+    fontSize: 9,
+    color: '#16A34A',
+    fontWeight: '700',
+    marginTop: 4,
+    letterSpacing: 0.2,
+  },
+
+  // ================================================================
+  // FREE SHIPPING PROGRESS
+  // ================================================================
+
+  shippingProgressText: {
+    fontSize: 11,
+    color: '#555555',
+    fontWeight: '500',
+    lineHeight: 17,
+    marginTop: 8,
+  },
+
+
     // 🎯 HIGH-END MONOCHROME RETENTION DESIGN SPECIFICATIONS ADDITIONS
   mapLoaderContainer: {
     height: 280, // Matches your standalone fixed map height boundaries perfectly
@@ -879,42 +3258,7 @@ checkoutItemsManifestWrapper: {
     textTransform: 'uppercase',
   },
 
-  // RETAIN GLOBAL CARD WRAPPER CELL ALIGNMENTS
-  subSectionLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#777777',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-  },
- promoRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
 
-  width: '100%',
-  height: 44,
-
-  marginBottom: 14,
-  gap: 8
-},
- promoInput: {
-  flex: 2,
-  height: '100%',
-
-  borderWidth: 1,
-  borderColor: '#EDEDED',
-
-  backgroundColor: '#FAFAFA',
-
-  paddingHorizontal: 12,
-
-  fontSize: 13,
-  color: '#111',
-
-  borderRadius: 10
-},
-    // 🎯 MINIMALIST CHECKOUT CARGO MANIFEST LIST SLATS
  manifestItemRowLine: {
   flexDirection: 'row',
   alignItems: 'center',
@@ -961,14 +3305,7 @@ manifestItemAttributesMetaText: {
   },
   
 
-  promoApplyBtn: {
-    flex: 1,
-    height: '100%',
-    backgroundColor: '#000000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 0, // Sharp square SHEIN aesthetic boundaries
-  },
+  
   promoApplyText: {
     color: '#FFFFFF',
     fontSize: 11,
@@ -988,41 +3325,7 @@ billingSummarySheet: {
 
   borderRadius: 12
 },
-  billingRow: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-
-  marginBottom: 8
-},
- billLabel: {
-  fontSize: 12,
-  color: '#666',
-  fontWeight: '500'
-},
- billValue: {
-  fontSize: 13,
-  color: '#111',
-  fontWeight: '700'
-},
- dividerLine: {
-  height: 1,
-  backgroundColor: '#F2F2F2',
-  marginVertical: 12
-},
-  totalRowSplit: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
- grandTotalLabel: {
-  fontSize: 11,
-  fontWeight: '900',
-  color: '#111',
-  letterSpacing: 0.6
-},
- grandTotalValue: {
-  fontSize: 18,
-  fontWeight: '900',
-  color: '#111',
-  letterSpacing: -0.3
-},
+ 
   // Prepayment Required Alerts Card layout
  prepayAlertCard: {
   backgroundColor: '#FFF8E6',

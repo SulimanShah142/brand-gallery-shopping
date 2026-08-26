@@ -8,24 +8,40 @@ import { useLanguage } from '@/Contexts/LanguageContext';
 import { useCart } from '@/Contexts/CartContext';
 import { useBadges } from '@/Contexts/BadgeContext';
 import { useAuthGuard } from '@/lib/useAuthGuard';
+import { HomeTabProvider, useHomeTab } from '@/Contexts/HomeTabContext';
 
 
 export default function ShopLayout() {
- 
+  return (
+    <HomeTabProvider>
+      <ShopLayoutContent />
+    </HomeTabProvider>
+  );
+}
+
+function ShopLayoutContent() {
   const { t, isRTL, locale } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { state: cartState } = useCart();
   const { userChatBadge } = useBadges();
 
+  const { handleHomeTabPress } = useHomeTab();
+
   const cartCount = useMemo(() => {
     const items = cartState?.items || [];
-    return items.reduce((sum, item) => sum + item.quantity, 0);
+
+    return items.reduce(
+      (sum, item) => sum + item.quantity,
+      0
+    );
   }, [cartState?.items]);
 
   const tabBarStyleWithInsets = useMemo(() => {
     const baseHeight = 56;
-    const bottomPadding = insets.bottom > 0 ? insets.bottom : 12;
+    const bottomPadding =
+      insets.bottom > 0 ? insets.bottom : 12;
+
     return {
       ...styles.tabBar,
       height: baseHeight + bottomPadding,
@@ -33,21 +49,77 @@ export default function ShopLayout() {
     };
   }, [insets.bottom]);
 
-
   const renderHeader = () => {
     return (
-      <View style={[styles.globalHeader, { paddingTop: insets.top + 10, paddingBottom: 14 }, isRTL && { flexDirection: 'row-reverse' }]}>
-        <View style={[styles.brandCluster, isRTL && { flexDirection: 'row-reverse' }]}>
-          <Image source={require('@/assets/images/app-icon.jpeg')} style={styles.headerLogoImage} resizeMode="contain" />
-          <Text style={styles.brandTitleText}> {t("brandGallery") || "Brand Gallery"}</Text>
+      <View
+        style={[
+          styles.globalHeader,
+          {
+            paddingTop: insets.top + 10,
+            paddingBottom: 14,
+          },
+          isRTL && {
+            flexDirection: 'row-reverse',
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.brandCluster,
+            isRTL && {
+              flexDirection: 'row-reverse',
+            },
+          ]}
+        >
+          <Image
+            source={require('@/assets/images/app-icon.jpeg')}
+            style={styles.headerLogoImage}
+            resizeMode="contain"
+          />
+
+          <Text style={styles.brandTitleText}>
+            {t('brandGallery') || 'Brand Gallery'}
+          </Text>
         </View>
-        <View style={[styles.actionCluster, isRTL && { flexDirection: 'row-reverse' }]}>
-          <TouchableOpacity onPress={() => router.push('/(shop)/profile')} style={styles.headerIconButton}>
-            <Ionicons name="person-outline" size={22} color="#000000" />
+
+        <View
+          style={[
+            styles.actionCluster,
+            isRTL && {
+              flexDirection: 'row-reverse',
+            },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={() =>
+              router.push('/(shop)/profile')
+            }
+            style={styles.headerIconButton}
+          >
+            <Ionicons
+              name="person-outline"
+              size={22}
+              color="#000000"
+            />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push('/cart')} style={styles.headerIconButton}>
-            <Ionicons name="bag-outline" size={22} color="#000000" />
-            {cartCount > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{cartCount}</Text></View>}
+
+          <TouchableOpacity
+            onPress={() => router.push('/cart')}
+            style={styles.headerIconButton}
+          >
+            <Ionicons
+              name="bag-outline"
+              size={22}
+              color="#000000"
+            />
+
+            {cartCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {cartCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -57,6 +129,7 @@ export default function ShopLayout() {
   return (
     <View style={styles.container}>
       {renderHeader()}
+
       <Tabs
         screenOptions={{
           headerShown: false,
@@ -64,28 +137,191 @@ export default function ShopLayout() {
           tabBarActiveTintColor: '#000000',
           tabBarInactiveTintColor: '#8E8E93',
           tabBarLabelStyle: styles.tabBarLabel,
-          tabBarHideOnKeyboard: Platform.OS === 'android',
+          tabBarHideOnKeyboard:
+            Platform.OS === 'android',
         }}
       >
-        <Tabs.Screen name="index" options={{ title: t('tabHome') || 'HOME', tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "home" : "home-outline"} size={20} color={color} /> }} />
-        <Tabs.Screen name="categories" options={{ title: t('tabCategories') || 'CATEGORIES', tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "grid" : "grid-outline"} size={20} color={color} /> }} />
-        <Tabs.Screen name="products" options={{ title: t('tabProducts') || 'PRODUCTS', tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "pricetags" : "pricetags-outline"} size={20} color={color} /> }} />
-        <Tabs.Screen name="orders" options={{ title: t('tabOrders') || 'ORDERS', tabBarIcon: ({ color, focused }) => <Ionicons name={focused ? "cube" : "cube-outline"} size={20} color={color} /> }} />
-        <Tabs.Screen name="chat" options={{ title: t('tabChat') || 'SUPPORT', tabBarIcon: ({ color, focused }) => <View style={{ position: 'relative' }}><Ionicons name={focused ? "chatbubble-ellipses" : "chatbubble-ellipses-outline"} size={20} color={color} />{Number(userChatBadge || 0) > 0 && <View style={styles.tabIconBadgeAlertMarker}><Text style={styles.tabIconBadgeAlertText}>{userChatBadge}</Text></View>}</View> }} />
-        
-        {/* 🎯 RESTORED PROFILE TAB WITH VALID NAVIGATION MAPPING ICON */}
-      
-        {/* Exclusion layers for hidden path sub-folders */}
-        <Tabs.Screen name="categories/[id]" options={{ href: null }} />
-        <Tabs.Screen name="product/[id]" options={{ href: null }} />
-        <Tabs.Screen name="orders/[id]" options={{ href: null }} />
-        <Tabs.Screen name="cart" options={{ href: null }} />
-        <Tabs.Screen name="checkout" options={{ href: null }} />
-       
-        <Tabs.Screen name="product/[id]/reviews" options={{ href: null }} />
-        <Tabs.Screen name="profile" options={{ href: null }} />
-        
-        
+        <Tabs.Screen
+          name="index"
+          listeners={{
+            tabPress: () => {
+              void handleHomeTabPress();
+            },
+          }}
+          options={{
+            title: t('tabHome') || 'HOME',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <Ionicons
+                name={
+                  focused
+                    ? 'home'
+                    : 'home-outline'
+                }
+                size={20}
+                color={color}
+              />
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="categories"
+          options={{
+            title:
+              t('tabCategories') ||
+              'CATEGORIES',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <Ionicons
+                name={
+                  focused
+                    ? 'grid'
+                    : 'grid-outline'
+                }
+                size={20}
+                color={color}
+              />
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="products"
+          options={{
+            title:
+              t('tabProducts') ||
+              'PRODUCTS',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <Ionicons
+                name={
+                  focused
+                    ? 'pricetags'
+                    : 'pricetags-outline'
+                }
+                size={20}
+                color={color}
+              />
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="orders"
+          options={{
+            title:
+              t('tabOrders') ||
+              'ORDERS',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <Ionicons
+                name={
+                  focused
+                    ? 'cube'
+                    : 'cube-outline'
+                }
+                size={20}
+                color={color}
+              />
+            ),
+          }}
+        />
+
+        <Tabs.Screen
+          name="chat"
+          options={{
+            title:
+              t('tabChat') ||
+              'SUPPORT',
+
+            tabBarIcon: ({
+              color,
+              focused,
+            }) => (
+              <View
+                style={{
+                  position: 'relative',
+                }}
+              >
+                <Ionicons
+                  name={
+                    focused
+                      ? 'chatbubble-ellipses'
+                      : 'chatbubble-ellipses-outline'
+                  }
+                  size={20}
+                  color={color}
+                />
+
+                {Number(userChatBadge || 0) > 0 && (
+                  <View
+                    style={
+                      styles.tabIconBadgeAlertMarker
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.tabIconBadgeAlertText
+                      }
+                    >
+                      {userChatBadge}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ),
+          }}
+        />
+
+        {/* Hidden routes */}
+
+        <Tabs.Screen
+          name="categories/[id]"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="product/[id]"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="orders/[id]"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="cart"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="checkout"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="product/[id]/reviews"
+          options={{ href: null }}
+        />
+
+        <Tabs.Screen
+          name="profile"
+          options={{ href: null }}
+        />
       </Tabs>
     </View>
   );

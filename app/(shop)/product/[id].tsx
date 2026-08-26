@@ -14,6 +14,7 @@ import {
   Dimensions,
   Modal,
 } from "react-native";
+import ImageViewer from "react-native-image-zoom-viewer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useCart } from "@/Contexts/CartContext";
@@ -27,8 +28,10 @@ import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { API_URL } from "@/lib/config";
 
 const { width } = Dimensions.get("window");
+
+
 export default function UserProductDetails() {
-  const { id } = useLocalSearchParams();
+const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { data: session } = authClient.useSession();
   // 🎯 CORE HOOK CONTEXT BINDINGS
@@ -37,21 +40,23 @@ export default function UserProductDetails() {
   const [ShowReviewForm, setShowReviewForm] = useState(false);
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const [activeImageIndex, setActiveImageIndex] = useState(0);
   // Core Functional States
   const [product, setProduct] = useState<any>(null);
   const [settings, setSettings] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [similarProducts, setSimilarProducts] = useState<any[]>([]);
   const [descModalVisible, setDescModalVisible] = useState(false);
-  const [imageViewerVisible, setImageViewerVisible] = useState(false);
-  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
   // Interaction States
   const [activeTab, setActiveTab] = useState<"DETAILS" | "REVIEWS">("DETAILS");
   const [selectedSize, setSelectedSize] = useState<string>("");
   const [selectedColor, setSelectedColor] = useState<string>("Standard");
   const [userRating, setUserRating] = useState<number>(5);
+const [activeImageIndex, setActiveImageIndex] = useState(0);
+const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+const [imageViewerVisible, setImageViewerVisible] = useState(false);
+
 
   const availableSizes = useMemo(() => {
     if (!product) return [];
@@ -72,6 +77,7 @@ export default function UserProductDetails() {
   const [uploading, setUploading] = useState(false);
   const [descTooLong, setDescTooLong] = useState(false);
   const { cachedUser, isPending: authPending } = authClient.useSession();
+  const [sizeGuideVisible, setSizeGuideVisible] = useState(false);
   // =========================
   // REVIEWS LOGIC LAYER
   // =========================
@@ -106,89 +112,819 @@ export default function UserProductDetails() {
       return [];
     }
   };
+// ============================================================
+// COMPLETE PRODUCT DETAILS LOADER
+// ============================================================
 
-  // 1. Fetch Complete Product Context data from Cloud Worker
-  useEffect(() => {
-    if (!id) return;
-    let userCanReview = false;
+useEffect(() => {
+  if (!id) return;
 
-    const loadProductData = async () => {
-      try {
-        setLoading(true);
-        const [prodRes, settingsRes, reviewsRes, similarRes] =
-          await Promise.all([
-            fetch(`${API_URL}/api/products/${id}`),
-            fetch(`${API_URL}/api/admin/settings`),
-            fetch(`${API_URL}/api/products/${id}/reviews`),
-            fetch(`${API_URL}/api/products?limit=12`),
-          ]);
-        // Inside your loadProductData() async routine inside the useEffect hook
-        const prodData = await prodRes.json();
-        const settingsData = await settingsRes.json();
-        const reviewsData = await reviewsRes.json();
-        const similarData = await similarRes.json();
-console.log("PRODUCT DATA");
-console.log(JSON.stringify(prodData, null, 2));
-console.log("imageUrl =", prodData.imageUrl);
-console.log("colorImageUrls =", prodData.colorImageUrls);
-        setProduct(prodData);
-        setSettings(settingsData);
-        setReviews(Array.isArray(reviewsData) ? reviewsData : []);
+  let cancelled = false;
 
-        // Determine if current user has a delivered order for this product
-        try {
-          const uid = session?.user?.id;
-          if (uid) {
-            const eligibilityRes = await fetch(`${API_URL}/api/orders/has-delivered?userId=${uid}&productId=${id}`);
-            const eligibility = await eligibilityRes.json();
-            userCanReview = !!eligibility?.delivered;
-          }
-        } catch (e) {
-          console.warn('Failed to check review eligibility', e);
-        }
+  const loadProductData = async () => {
+    try {
+      setLoading(true);
 
-        // 🎯 THE CRITICAL CONFIGURATION FIX: Auto-select the first actual color returned from your Neon database!
-        if (prodData?.availableColors && prodData.availableColors.length > 0) {
-          setSelectedColor(prodData.availableColors[0]);
-        } else {
-          setSelectedColor("Standard"); // Reliable backup if the item lacks explicit color properties
-        }
+      // ========================================================
+      // HELPER: NORMALIZE STRING ARRAYS
+      // ========================================================
 
-        const normalizedSizes = Array.isArray(prodData?.availableSizes)
-          ? prodData.availableSizes
-          : typeof prodData?.availableSizes === 'string'
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(prodData.availableSizes);
-                  return Array.isArray(parsed) ? parsed : prodData.availableSizes.split(',').map((p: string) => p.trim()).filter(Boolean);
-                } catch {
-                  return prodData.availableSizes.split(',').map((p: string) => p.trim()).filter(Boolean);
-                }
-              })()
-            : [];
+      const normalizeStringArray = (
+        value: any
+      ): string[] => {
+        if (!value) return [];
 
-        if (normalizedSizes.length > 0) {
-          setSelectedSize(normalizedSizes[0]);
-        } else {
-          setSelectedSize("");
-        }
-
-        if (Array.isArray(similarData)) {
-          setSimilarProducts(
-            similarData.filter((p: any) => p.id !== id).slice(0, 10),
+        // Already an array
+        if (Array.isArray(value)) {
+          return Array.from(
+            new Set(
+              value
+                .map((item: any) =>
+                  String(item).trim()
+                )
+                .filter(Boolean)
+            )
           );
         }
 
-        // already set above: product, settings, reviews, similarProducts handled
-      } catch (err) {
-        console.error("❌ Failed to parse item metrics topology:", err);
-      } finally {
+        // JSON string or comma-separated string
+        if (typeof value === "string") {
+          const raw = value.trim();
+
+          if (!raw) return [];
+
+          // Try JSON first
+          try {
+            const parsed = JSON.parse(raw);
+
+            if (Array.isArray(parsed)) {
+              return Array.from(
+                new Set(
+                  parsed
+                    .map((item: any) =>
+                      String(item).trim()
+                    )
+                    .filter(Boolean)
+                )
+              );
+            }
+          } catch {
+            // Not JSON — continue as CSV.
+          }
+
+          return Array.from(
+            new Set(
+              raw
+                .split(",")
+                .map((item: string) =>
+                  item.trim()
+                )
+                .filter(Boolean)
+            )
+          );
+        }
+
+        return [];
+      };
+
+
+      // ========================================================
+      // HELPER: NORMALIZE IMAGE ARRAYS
+      // ========================================================
+
+      const normalizeImageArray = (
+        value: any
+      ): string[] => {
+        if (!value) return [];
+
+        // Array of URLs / image objects
+        if (Array.isArray(value)) {
+          return Array.from(
+            new Set(
+              value
+                .map((image: any) => {
+                  if (
+                    typeof image === "string"
+                  ) {
+                    return image.trim();
+                  }
+
+                  if (image?.url) {
+                    return String(
+                      image.url
+                    ).trim();
+                  }
+
+                  if (image?.imageUrl) {
+                    return String(
+                      image.imageUrl
+                    ).trim();
+                  }
+
+                  if (image?.src) {
+                    return String(
+                      image.src
+                    ).trim();
+                  }
+
+                  return "";
+                })
+                .filter(Boolean)
+            )
+          );
+        }
+
+        // String containing JSON or a direct URL
+        if (typeof value === "string") {
+          const raw = value.trim();
+
+          if (!raw) return [];
+
+          try {
+            const parsed =
+              JSON.parse(raw);
+
+            if (Array.isArray(parsed)) {
+              return normalizeImageArray(
+                parsed
+              );
+            }
+
+            if (
+              typeof parsed === "string" &&
+              parsed.trim()
+            ) {
+              return [parsed.trim()];
+            }
+          } catch {
+            // Plain URL.
+          }
+
+          return [raw];
+        }
+
+        return [];
+      };
+
+
+      // ========================================================
+      // 1. FETCH PRODUCT
+      // ========================================================
+
+      const prodRes = await fetch(
+        `${API_URL}/api/products/${id}`
+      );
+
+      if (!prodRes.ok) {
+        throw new Error(
+          `Product request failed: ${prodRes.status}`
+        );
+      }
+
+      const prodData =
+        await prodRes.json();
+
+      if (cancelled) return;
+
+
+      // ========================================================
+      // DEBUG — RAW PRODUCT RESPONSE
+      // ========================================================
+
+      console.log(
+        "========================================"
+      );
+
+      console.log(
+        "🛍️ COMPLETE PRODUCT DATA"
+      );
+
+      console.log(
+        JSON.stringify(
+          prodData,
+          null,
+          2
+        )
+      );
+
+      console.log(
+        "imageUrl =",
+        prodData?.imageUrl
+      );
+
+      console.log(
+        "images =",
+        prodData?.images
+      );
+
+      console.log(
+        "availableColors =",
+        prodData?.availableColors
+      );
+
+      console.log(
+        "colorImages =",
+        prodData?.colorImages
+      );
+
+      console.log(
+        "colorImageUrls =",
+        prodData?.colorImageUrls
+      );
+
+      console.log(
+        "========================================"
+      );
+
+
+      // ========================================================
+      // 2. FETCH REMAINING CONTEXT
+      // ========================================================
+      //
+      // The new product endpoint may already contain these.
+      // We only request them separately when necessary.
+      // ========================================================
+
+      const needsSettings =
+        !prodData?.settings;
+
+      const needsReviews =
+        !Array.isArray(
+          prodData?.reviews
+        );
+
+      const needsSimilar =
+        !Array.isArray(
+          prodData?.similarProducts
+        );
+
+      const [
+        settingsResult,
+        reviewsResult,
+        similarResult,
+      ] = await Promise.all([
+        needsSettings
+          ? fetch(
+              `${API_URL}/api/admin/settings`
+            )
+          : Promise.resolve(null),
+
+        needsReviews
+          ? fetch(
+              `${API_URL}/api/products/${id}/reviews`
+            )
+          : Promise.resolve(null),
+
+        needsSimilar
+          ? fetch(
+              `${API_URL}/api/products?limit=12`
+            )
+          : Promise.resolve(null),
+      ]);
+
+
+      // ========================================================
+      // 3. SETTINGS
+      // ========================================================
+
+      let settingsData =
+        prodData?.settings || null;
+
+      if (
+        !settingsData &&
+        settingsResult
+      ) {
+        try {
+          if (
+            settingsResult.ok
+          ) {
+            settingsData =
+              await settingsResult.json();
+          }
+        } catch (error) {
+          console.warn(
+            "⚠️ Failed to parse settings:",
+            error
+          );
+        }
+      }
+
+
+      // ========================================================
+      // 4. REVIEWS
+      // ========================================================
+
+      let reviewsData: any[] =
+        Array.isArray(
+          prodData?.reviews
+        )
+          ? prodData.reviews
+          : [];
+
+      if (
+        reviewsData.length === 0 &&
+        reviewsResult
+      ) {
+        try {
+          if (
+            reviewsResult.ok
+          ) {
+            const parsedReviews =
+              await reviewsResult.json();
+
+            if (
+              Array.isArray(
+                parsedReviews
+              )
+            ) {
+              reviewsData =
+                parsedReviews;
+            }
+          }
+        } catch (error) {
+          console.warn(
+            "⚠️ Failed to parse reviews:",
+            error
+          );
+        }
+      }
+
+
+      // ========================================================
+      // 5. SIMILAR PRODUCTS
+      // ========================================================
+
+      let similarData: any[] =
+        Array.isArray(
+          prodData?.similarProducts
+        )
+          ? prodData.similarProducts
+          : [];
+
+      if (
+        similarData.length === 0 &&
+        similarResult
+      ) {
+        try {
+          if (
+            similarResult.ok
+          ) {
+            const parsedSimilar =
+              await similarResult.json();
+
+            if (
+              Array.isArray(
+                parsedSimilar
+              )
+            ) {
+              similarData =
+                parsedSimilar;
+            }
+          }
+        } catch (error) {
+          console.warn(
+            "⚠️ Failed to parse similar products:",
+            error
+          );
+        }
+      }
+
+
+      // ========================================================
+      // 6. NORMALIZE AVAILABLE SIZES
+      // ========================================================
+
+      const normalizedSizes =
+        normalizeStringArray(
+          prodData?.availableSizes
+        );
+
+
+      // ========================================================
+      // 7. NORMALIZE AVAILABLE COLORS
+      // ========================================================
+
+      const normalizedColors =
+        normalizeStringArray(
+          prodData?.availableColors
+        );
+
+
+      // ========================================================
+      // 8. NORMALIZE COLOR → IMAGES
+      // ========================================================
+      //
+      // Preferred backend structure:
+      //
+      // colorImages: {
+      //   Black: [
+      //     "black-front.jpg",
+      //     "black-back.jpg"
+      //   ],
+      //
+      //   White: [
+      //     "white-front.jpg",
+      //     "white-back.jpg"
+      //   ]
+      // }
+      //
+      // This is what allows:
+      //
+      // User taps BLACK
+      //       ↓
+      // Black images become active
+      //
+      // User taps WHITE
+      //       ↓
+      // White images become active
+      // ========================================================
+
+      const normalizedColorImages: Record<
+        string,
+        string[]
+      > = {};
+
+      // --------------------------------------------------------
+      // Preferred: colorImages
+      // --------------------------------------------------------
+
+      if (
+        prodData?.colorImages &&
+        typeof prodData.colorImages ===
+          "object" &&
+        !Array.isArray(
+          prodData.colorImages
+        )
+      ) {
+        Object.entries(
+          prodData.colorImages
+        ).forEach(
+          ([color, images]) => {
+            const normalized =
+              normalizeImageArray(
+                images
+              );
+
+            if (
+              normalized.length > 0
+            ) {
+              normalizedColorImages[
+                color
+              ] = normalized;
+            }
+          }
+        );
+      }
+
+
+      // --------------------------------------------------------
+      // Compatibility: colorImageUrls
+      // --------------------------------------------------------
+
+      if (
+        prodData?.colorImageUrls &&
+        typeof prodData.colorImageUrls ===
+          "object" &&
+        !Array.isArray(
+          prodData.colorImageUrls
+        )
+      ) {
+        Object.entries(
+          prodData.colorImageUrls
+        ).forEach(
+          ([color, images]) => {
+            const normalized =
+              normalizeImageArray(
+                images
+              );
+
+            if (
+              normalized.length > 0 &&
+              !normalizedColorImages[
+                color
+              ]
+            ) {
+              normalizedColorImages[
+                color
+              ] = normalized;
+            }
+          }
+        );
+      }
+
+
+      // ========================================================
+      // 9. NORMALIZE GENERAL PRODUCT IMAGES
+      // ========================================================
+
+      const primaryImage =
+        typeof prodData?.imageUrl ===
+        "string"
+          ? prodData.imageUrl.trim()
+          : "";
+
+      const directImages =
+        normalizeImageArray(
+          prodData?.images
+        );
+
+      const imageUrls =
+        normalizeImageArray(
+          prodData?.imageUrls
+        );
+
+      const normalizedProductImages =
+        Array.from(
+          new Set(
+            [
+              primaryImage,
+              ...directImages,
+              ...imageUrls,
+            ].filter(Boolean)
+          )
+        );
+
+
+      // ========================================================
+      // 10. BUILD COMPLETE PRODUCT OBJECT
+      // ========================================================
+
+      const completeProduct = {
+        ...prodData,
+
+        // Normalized selections
+        availableSizes:
+          normalizedSizes,
+
+        availableColors:
+          normalizedColors,
+
+        // General gallery
+        images:
+          normalizedProductImages,
+
+        // IMPORTANT:
+        // Color-specific galleries
+        colorImages:
+          normalizedColorImages,
+
+        // Related data
+        reviews:
+          reviewsData,
+
+        similarProducts:
+          similarData
+            .filter(
+              (p: any) =>
+                String(p?.id) !==
+                String(id)
+            )
+            .slice(0, 10),
+
+        // Settings
+        settings:
+          settingsData,
+      };
+
+
+      // ========================================================
+      // 11. SAVE PRODUCT
+      // ========================================================
+
+      if (!cancelled) {
+        setProduct(
+          completeProduct
+        );
+
+        setSettings(
+          settingsData
+        );
+
+        setReviews(
+          reviewsData
+        );
+
+        setSimilarProducts(
+          completeProduct.similarProducts
+        );
+      }
+
+
+      // ========================================================
+      // 12. INITIAL COLOR
+      // ========================================================
+
+     setSelectedColor("Standard");
+
+
+      // ========================================================
+      // 13. INITIAL SIZE
+      // ========================================================
+
+      if (
+        normalizedSizes.length > 0
+      ) {
+        setSelectedSize(
+          normalizedSizes[0]
+        );
+      } else {
+        setSelectedSize("");
+      }
+
+
+      // ========================================================
+      // 14. RESET GALLERY INDEX
+      // ========================================================
+
+      setActiveImageIndex(0);
+
+
+      // ========================================================
+      // 15. DEBUG FINAL NORMALIZED DATA
+      // ========================================================
+
+      console.log(
+        "========================================"
+      );
+
+      console.log(
+        "🎨 NORMALIZED COLORS"
+      );
+
+      console.log(
+        normalizedColors
+      );
+
+      console.log(
+        "📏 NORMALIZED SIZES"
+      );
+
+      console.log(
+        normalizedSizes
+      );
+
+      console.log(
+        "🖼️ NORMALIZED GENERAL IMAGES"
+      );
+
+      console.log(
+        normalizedProductImages
+      );
+
+      console.log(
+        "🎨🖼️ COLOR → IMAGE MAP"
+      );
+
+      console.log(
+        JSON.stringify(
+          normalizedColorImages,
+          null,
+          2
+        )
+      );
+
+      console.log(
+        "⭐ REVIEWS:",
+        reviewsData.length
+      );
+
+      console.log(
+        "🔗 SIMILAR PRODUCTS:",
+        completeProduct.similarProducts.length
+      );
+
+      console.log(
+        "========================================"
+      );
+
+
+    } catch (err) {
+      // ========================================================
+      // ERROR HANDLING
+      // ========================================================
+
+      console.error(
+        "❌ Failed to load complete product details:",
+        err
+      );
+
+      if (!cancelled) {
+        setProduct(null);
+        setReviews([]);
+        setSimilarProducts([]);
+        setSettings(null);
+        setSelectedSize("");
+        setSelectedColor("Standard");
+        setActiveImageIndex(0);
+      }
+
+    } finally {
+      // ========================================================
+      // LOADING COMPLETE
+      // ========================================================
+
+      if (!cancelled) {
         setLoading(false);
       }
-    };
+    }
+  };
 
-    loadProductData();
-  }, [id]);
+
+  // ==========================================================
+  // EXECUTE
+  // ==========================================================
+
+  loadProductData();
+
+
+  // ==========================================================
+  // CLEANUP
+  // ==========================================================
+
+  return () => {
+    cancelled = true;
+  };
+
+}, [id]);
+
+const handleColorChange = (
+  color: string
+) => {
+  const cleanColor = String(color).trim();
+
+  if (!cleanColor) return;
+
+  setSelectedColor(cleanColor);
+
+  // Start the new color gallery from the beginning.
+  setActiveImageIndex(0);
+
+  // Close fullscreen viewer if currently open.
+  setImageViewerVisible(false);
+
+  setSelectedImageUri(null);
+};
+
+const colorOptions = useMemo(() => {
+  if (!product) return [];
+
+  const rawColors = product.availableColors;
+
+  if (!Array.isArray(rawColors)) {
+    return [];
+  }
+
+  return rawColors
+    .flatMap((item: any) =>
+      typeof item === "string"
+        ? item
+            .split(",")
+            .map((value: string) => value.trim())
+            .filter(Boolean)
+        : []
+    )
+    .filter(
+      (color: string, index: number, array: string[]) =>
+        array.findIndex(
+          (item) =>
+            item.toLowerCase() === color.toLowerCase()
+        ) === index
+    );
+}, [product]);
+
+const colorSelectorOptions = useMemo(() => {
+  return [
+    "Standard",
+    ...colorOptions,
+  ];
+}, [colorOptions]);
+
+const getLocalizedColorName = (
+  color: string,
+  index: number
+) => {
+  if (
+    color.toLowerCase() === "standard"
+  ) {
+    return t("standardColor") || "STANDARD";
+  }
+
+  if (locale === "ps") {
+    return (
+      product?.availableColorsPs?.[index] ||
+      color
+    );
+  }
+
+  if (locale === "fa") {
+    return (
+      product?.availableColorsFa?.[index] ||
+      color
+    );
+  }
+
+  return color;
+};
 
   // Only show the review form if user has delivered this product
   const canOpenReviewForm = () => {
@@ -373,19 +1109,107 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
     Alert.alert(t("addedToBag") || "Added to Bag", formattedAlertMessage);
   };
 
-  const productImages = useMemo(() => {
-    if (!product) return [];
+// ============================================================
+// COLOR-AWARE PRODUCT GALLERY
+// ============================================================
 
-    return [product.imageUrl, ...(product.colorImageUrls || [])].filter(
-      Boolean,
-    );
-  }, [product]);
+const productImages = useMemo(() => {
+  if (!product) return [];
+
+  const mainImage =
+    typeof product.imageUrl === "string"
+      ? product.imageUrl.trim()
+      : "";
+
+  // ------------------------------------------------------------
+  // STANDARD = ORIGINAL PRODUCT
+  // ------------------------------------------------------------
+
+  if (
+    !selectedColor ||
+    selectedColor.toLowerCase() === "standard"
+  ) {
+    return mainImage ? [mainImage] : [];
+  }
+
+  // ------------------------------------------------------------
+  // SELECTED COLOR IMAGES
+  // ------------------------------------------------------------
+
+  const colorImages =
+    product.colorImages &&
+    typeof product.colorImages === "object"
+      ? product.colorImages
+      : {};
+
+  const selectedKey = Object.keys(colorImages).find(
+    (key) =>
+      String(key).trim().toLowerCase() ===
+      String(selectedColor).trim().toLowerCase()
+  );
+
+  if (!selectedKey) {
+    return mainImage ? [mainImage] : [];
+  }
+
+  const images = Array.isArray(colorImages[selectedKey])
+    ? colorImages[selectedKey]
+        .map((image: any) => String(image).trim())
+        .filter(Boolean)
+    : [];
+
+  // ------------------------------------------------------------
+  // NEVER RETURN EMPTY GALLERY
+  // ------------------------------------------------------------
+
+  return images.length > 0
+    ? [...new Set(images)]
+    : mainImage
+      ? [mainImage]
+      : [];
+}, [product, selectedColor]);
+
 
   const openImageViewer = useCallback((uri?: string | null) => {
     if (!uri) return;
     setSelectedImageUri(uri);
     setImageViewerVisible(true);
   }, []);
+
+const getColorThumbnail = useCallback(
+  (color: string): string | null => {
+    if (!product || !color) return null;
+
+    const colorImages =
+      product?.colorImages &&
+      typeof product.colorImages === "object" &&
+      !Array.isArray(product.colorImages)
+        ? product.colorImages
+        : {};
+
+    const images = colorImages?.[color];
+
+    if (Array.isArray(images) && images.length > 0) {
+      const first = images[0];
+
+      if (typeof first === "string") {
+        return first;
+      }
+
+      if (first?.url) {
+        return String(first.url);
+      }
+
+      if (first?.imageUrl) {
+        return String(first.imageUrl);
+      }
+    }
+
+    return null;
+  },
+  [product]
+);
+
 
   const renderStars = (rating: number, interactive = false) => {
     return Array.from({ length: 5 }, (_, i) => (
@@ -623,68 +1447,156 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
           contentContainerStyle={styles.scrollContentContainer}
         >
           {/* IMAGE HERO SECTION */}
-          <View
-            style={[
-              styles.heroContainer,
-              {
-                direction: "ltr",
-              },
-            ]}
-          >
-            {productImages.length > 0 && (
-              <TouchableOpacity
-                style={styles.imageViewerButton}
-                activeOpacity={0.85}
-                onPress={() => openImageViewer(productImages[activeImageIndex])}
-              >
-                <Ionicons name="expand-outline" size={18} color="#111111" />
-              </TouchableOpacity>
-            )}
+        {/* ============================================================
+    PRODUCT IMAGE GALLERY
+============================================================ */}
+<View
+  style={[
+    styles.heroContainer,
+    {
+      direction: "ltr",
+    },
+  ]}
+>
+  {/* FULLSCREEN BUTTON */}
 
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{
-                flexDirection: "row",
-                alignItems: "stretch",
-                paddingHorizontal: 0,
+  {productImages.length > 0 && (
+    <TouchableOpacity
+      style={styles.imageViewerButton}
+      activeOpacity={0.85}
+      onPress={() => {
+        const currentImage =
+          productImages[activeImageIndex] ||
+          productImages[0];
+
+        if (!currentImage) return;
+
+        setSelectedImageUri(currentImage);
+        setImageViewerVisible(true);
+      }}
+    >
+      <Ionicons
+        name="expand-outline"
+        size={18}
+        color="#111111"
+      />
+    </TouchableOpacity>
+  )}
+
+  {/* PRODUCT IMAGE GALLERY */}
+
+  {productImages.length > 0 ? (
+    <ScrollView
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      style={{
+        width,
+      }}
+      contentContainerStyle={{
+        flexDirection: "row",
+        alignItems: "stretch",
+      }}
+      scrollEventThrottle={16}
+      onScroll={(event) => {
+        const index = Math.round(
+          event.nativeEvent.contentOffset.x /
+            width
+        );
+
+        if (
+          index >= 0 &&
+          index < productImages.length
+        ) {
+          setActiveImageIndex(index);
+        }
+      }}
+    >
+      {productImages.map(
+        (image: string, index: number) => (
+          <TouchableOpacity
+            key={`${selectedColor}-${index}-${image}`}
+            activeOpacity={0.98}
+            onPress={() => {
+              setSelectedImageUri(image);
+              setImageViewerVisible(true);
+            }}
+            style={{
+              width,
+              height: 420,
+            }}
+          >
+            <Image
+              source={{
+                uri: image,
               }}
               style={{
-                width: width,
-                marginHorizontal: 0,
+                width: "100%",
+                height: "100%",
               }}
-              onScroll={(e) => {
-                const index = Math.round(e.nativeEvent.contentOffset.x / width);
-                setActiveImageIndex(index);
-              }}
-              scrollEventThrottle={16}
-            >
-              {productImages.map((img, index) => (
-                <View
-                  key={index}
-                  style={{
-                    width: width,
-                    height: 420,
-                    marginRight: 0,
-                    marginLeft: 0,
-                    padding: 0,
-                  }}
-                >
-                  <Image
-                    source={{ uri: img }}
-                    style={{
-                      width: width,
-                      height: 420,
-                      margin: 0,
-                    }}
-                    resizeMode="cover"
-                  />
-                </View>
-              ))}
-            </ScrollView>
-          </View>
+              resizeMode="cover"
+            />
+          </TouchableOpacity>
+        )
+      )}
+    </ScrollView>
+  ) : (
+    <View
+      style={{
+        width,
+        height: 420,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Ionicons
+        name="image-outline"
+        size={42}
+        color="#999999"
+      />
+    </View>
+  )}
 
+
+  {/* ==========================================================
+      IMAGE DOT INDICATOR
+  ========================================================== */}
+
+  {productImages.length > 1 && (
+    <View
+      style={{
+        position: "absolute",
+        bottom: 14,
+        left: 0,
+        right: 0,
+        flexDirection: "row",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {productImages.map(
+        (_: string, index: number) => (
+          <View
+            key={`indicator-${index}`}
+            style={{
+              width:
+                index === activeImageIndex
+                  ? 18
+                  : 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor:
+                index === activeImageIndex
+                  ? "#111111"
+                  : "rgba(0,0,0,0.25)",
+            }}
+          />
+        )
+      )}
+    </View>
+  )}
+</View>
           {/* HIGH-END MINIMAL INFO SHEET CARD */}
           <View style={styles.productCard}>
             <View style={[styles.ratingRow]}>
@@ -745,11 +1657,14 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
                     {(t("selectSize") || "SELECT SIZE").toUpperCase()}
                   </Text>
 
-                  <TouchableOpacity activeOpacity={0.8}>
-                    <Text style={styles.sizeGuideLabelText}>
-                      {(t("sizeGuide") || "SIZE GUIDE").toUpperCase()}
-                    </Text>
-                  </TouchableOpacity>
+           <TouchableOpacity
+  activeOpacity={0.8}
+  onPress={() => setSizeGuideVisible(true)}
+>
+  <Text style={styles.sizeGuideLabelText}>
+    {(t("sizeGuide") || "SIZE GUIDE").toUpperCase()}
+  </Text>
+</TouchableOpacity>
                 </View>
 
                 <View style={[styles.sizeGridWrapper]}>
@@ -784,74 +1699,223 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
             {/* =========================
                   COLOR SELECTOR WITH EXTRACTED ARRAYS LOOKUPS
             ========================= */}
-            <View style={[styles.sizeMatrixHeader, { marginTop: 10 }]}>
-              <Text style={styles.sizeSectionTitle}>
-                {(t("selectColor") || "SELECT COLOR").toUpperCase()}
-              </Text>
+         {/* ============================================================
+    COLOR SELECTOR
+============================================================ */}
+{/* ============================================================
+    COLOR SELECTOR
+============================================================ */}
 
-              {selectedColor ? (
-                <Text style={styles.selectedColorLabel}>
-                  {selectedColor.toUpperCase()}
-                </Text>
-              ) : null}
-            </View>
+<View
+  style={[
+    styles.sizeMatrixHeader,
+    {
+      marginTop: 18,
+    },
+    isRTL && {
+      flexDirection: "row-reverse",
+    },
+  ]}
+>
+  <Text
+    style={[
+      styles.sizeSectionTitle,
+      isRTL && {
+        textAlign: "right",
+      },
+    ]}
+  >
+    {(t("selectColor") || "SELECT COLOR").toUpperCase()}
+  </Text>
 
-            <View style={[styles.sizeGridWrapper, { flexWrap: "wrap" }]}>
-              {Array.isArray(product?.availableColors) &&
-              product.availableColors.length > 0 ? (
-                product.availableColors
-                  .flatMap((item: string) =>
-                    typeof item === "string" ? item.split(",") : [item],
-                  )
-                  .map((rawColor: string, index: number) => {
-                    const colorInEnglish = rawColor.trim();
-                    if (!colorInEnglish) return null;
+  {selectedColor ? (
+    <Text
+      style={[
+        styles.selectedColorLabel,
+        isRTL && {
+          textAlign: "left",
+        },
+      ]}
+    >
+      {selectedColor.toUpperCase()}
+    </Text>
+  ) : null}
+</View>
 
-                    // 🎯 INDEX-MATCHED LOCALIZED LABELS RESTORED NATIVELY
-                    const localizedColorLabel =
-                      locale === "ps"
-                        ? product.availableColorsPs?.[index] || colorInEnglish
-                        : locale === "fa"
-                          ? product.availableColorsFa?.[index] || colorInEnglish
-                          : colorInEnglish;
+{/* ============================================================
+    SHEIN-STYLE HORIZONTAL COLOR SELECTOR
+    TEXT ONLY — NO COLOR IMAGES
+============================================================ */}
 
-                    return (
-                      <TouchableOpacity
-                        key={`color-pill-separated-${colorInEnglish}`}
-                        style={[
-                          styles.sizeItemBox,
-                          { flex: 0, minWidth: 74, paddingHorizontal: 14 },
-                          selectedColor === colorInEnglish &&
-                            styles.sizeItemBoxActive,
-                        ]}
-                        onPress={() => setSelectedColor(colorInEnglish)}
-                      >
-                        <Text
-                          style={[
-                            styles.sizeText,
-                            selectedColor === colorInEnglish &&
-                              styles.sizeTextActive,
-                          ]}
-                        >
-                          {localizedColorLabel.toUpperCase()}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })
-              ) : (
-                <View
-                  style={[
-                    styles.sizeItemBox,
-                    styles.sizeItemBoxActive,
-                    { flex: 0, paddingHorizontal: 20 },
-                  ]}
-                >
-                  <Text style={styles.sizeTextActive}>
-                    {(t("standardColor") || "STANDARD").toUpperCase()}
-                  </Text>
-                </View>
-              )}
-            </View>
+<ScrollView
+  horizontal
+  showsHorizontalScrollIndicator={false}
+  contentContainerStyle={{
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+    paddingRight: 18,
+    gap: 8,
+  }}
+  style={{
+    marginTop: 2,
+  }}
+>
+  {colorSelectorOptions.map(
+    (color: string, index: number) => {
+      const isStandard =
+        color.toLowerCase() === "standard";
+
+      const isSelected =
+        selectedColor.toLowerCase() ===
+        color.toLowerCase();
+
+      const localizedLabel =
+        getLocalizedColorName(
+          color,
+          index - 1
+        );
+
+      return (
+        <TouchableOpacity
+          key={`color-option-${color}-${index}`}
+          activeOpacity={0.85}
+          onPress={() =>
+            handleColorChange(color)
+          }
+          style={[
+            styles.sizeItemBox,
+            {
+              flex: 0,
+              minWidth: 82,
+              paddingHorizontal: 16,
+              marginRight: 0,
+            },
+            isSelected &&
+              styles.sizeItemBoxActive,
+          ]}
+        >
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.sizeText,
+              isSelected &&
+                styles.sizeTextActive,
+            ]}
+          >
+            {String(
+              localizedLabel
+            ).toUpperCase()}
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+  )}
+</ScrollView>
+
+{/* ============================================================
+    HORIZONTAL COLOR NAME SELECTOR
+============================================================ */}
+
+{/* HORIZONTAL COLOR GALLERY */}
+
+{Array.isArray(product?.availableColors) &&
+product.availableColors.length > 0 ? (
+  <ScrollView
+    horizontal
+    showsHorizontalScrollIndicator={false}
+    contentContainerStyle={{
+      paddingVertical: 8,
+      paddingRight: 16,
+      paddingLeft: 2,
+    }}
+    style={{
+      marginTop: 2,
+    }}
+  >
+    {product.availableColors
+      .flatMap((item: any) =>
+        typeof item === "string"
+          ? item
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+          : [item]
+      )
+      .map(
+        (
+          rawColor: string,
+          index: number
+        ) => {
+          const colorInEnglish =
+            String(rawColor).trim();
+
+          if (!colorInEnglish) {
+            return null;
+          }
+
+          const isSelected =
+            selectedColor === colorInEnglish;
+
+          const thumbnail =
+            getColorThumbnail(
+              colorInEnglish
+            );
+
+          const localizedColorLabel =
+            locale === "ps"
+              ? product.availableColorsPs?.[
+                  index
+                ] ||
+                colorInEnglish
+              : locale === "fa"
+                ? product.availableColorsFa?.[
+                    index
+                  ] ||
+                  colorInEnglish
+                : colorInEnglish;
+
+          return (
+            <TouchableOpacity
+              key={`color-${colorInEnglish}-${index}`}
+              activeOpacity={0.85}
+              onPress={() =>
+                handleColorChange(
+                  colorInEnglish
+                )
+              }
+              style={[
+                styles.colorOption,
+                isSelected &&
+                  styles.colorOptionActive,
+              ]}
+            >
+              {/* COLOR IMAGE */}
+
+        
+
+              {/* COLOR NAME */}
+
+            </TouchableOpacity>
+          );
+        }
+      )}
+  </ScrollView>
+) : (
+  <View
+    style={[
+      styles.standardColorFallback,
+      isRTL && {
+        alignSelf: "flex-end",
+      },
+    ]}
+  >
+    <Text style={styles.standardColorFallbackText}>
+      {(t("standardColor") || "STANDARD").toUpperCase()}
+    </Text>
+  </View>
+)}
           </View>
 
           {/* =========================
@@ -1121,6 +2185,474 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      {/* ============================================================
+    SIZE GUIDE / PRODUCT DETAILS BOTTOM SHEET
+============================================================ */}
+
+<Modal
+  visible={sizeGuideVisible}
+  transparent
+  animationType="slide"
+  onRequestClose={() => setSizeGuideVisible(false)}
+>
+  <View
+    style={{
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.45)",
+      justifyContent: "flex-end",
+    }}
+  >
+    {/* BACKDROP */}
+
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={() => setSizeGuideVisible(false)}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      }}
+    />
+
+    {/* ========================================================
+        BOTTOM SHEET
+    ======================================================== */}
+
+    <View
+      style={{
+        backgroundColor: "#FFFFFF",
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        maxHeight: "88%",
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 18,
+      }}
+    >
+      {/* HANDLE */}
+
+      <View
+        style={{
+          width: 42,
+          height: 4,
+          borderRadius: 4,
+          backgroundColor: "#D0D0D0",
+          alignSelf: "center",
+          marginBottom: 18,
+        }}
+      />
+
+      {/* HEADER */}
+
+      <View
+        style={{
+          paddingHorizontal: 20,
+          flexDirection: isRTL
+            ? "row-reverse"
+            : "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 16,
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 20,
+              fontWeight: "800",
+              color: "#111111",
+              textAlign: isRTL
+                ? "right"
+                : "left",
+            }}
+          >
+            {(
+              t("sizeGuide") ||
+              "SIZE GUIDE"
+            ).toUpperCase()}
+          </Text>
+
+          <Text
+            style={{
+              marginTop: 4,
+              fontSize: 12,
+              color: "#777777",
+              textAlign: isRTL
+                ? "right"
+                : "left",
+            }}
+          >
+            {(
+              t("productDetails") ||
+              "PRODUCT DETAILS"
+            ).toUpperCase()}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() =>
+            setSizeGuideVisible(false)
+          }
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: "#F3F3F3",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons
+            name="close"
+            size={21}
+            color="#111111"
+          />
+        </TouchableOpacity>
+      </View>
+
+      {/* ========================================================
+          TABLE CONTENT
+      ======================================================== */}
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingBottom: 20,
+        }}
+      >
+        {Array.isArray(
+          product?.specificationTables
+        ) &&
+        product.specificationTables.length > 0 ? (
+          product.specificationTables.map(
+            (table: any, tableIndex: number) => {
+              const rows = Array.isArray(
+                table?.rows
+              )
+                ? table.rows
+                : [];
+
+              if (rows.length === 0) {
+                return null;
+              }
+
+              /*
+               * Collect all measurement column names
+               * from the rows.
+               */
+
+              const measurementKeys =
+                Array.from(
+                  new Set(
+                    rows.flatMap(
+                      (row: any) =>
+                        row?.measurements &&
+                        typeof row.measurements ===
+                          "object"
+                          ? Object.keys(
+                              row.measurements
+                            )
+                          : []
+                    )
+                  )
+                );
+
+              /*
+               * Localized table title
+               */
+
+              const localizedTitle =
+                locale === "ps"
+                  ? table.titlePs ||
+                    table.title ||
+                    ""
+                  : locale === "fa"
+                    ? table.titleFa ||
+                      table.title ||
+                      ""
+                    : table.title || "";
+
+              return (
+                <View
+                  key={`spec-table-${table.id || tableIndex}`}
+                  style={{
+                    marginBottom: 28,
+                  }}
+                >
+                  {/* TABLE TITLE */}
+
+                  <Text
+                    style={{
+                      fontSize: 16,
+                      fontWeight: "800",
+                      color: "#111111",
+                      marginBottom: 12,
+                      textAlign: isRTL
+                        ? "right"
+                        : "left",
+                    }}
+                  >
+                    {String(
+                      localizedTitle
+                    ).toUpperCase()}
+                  </Text>
+
+                  {/* ==================================================
+                      HORIZONTAL TABLE
+                  ================================================== */}
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={
+                      false
+                    }
+                  >
+                    <View
+                      style={{
+                        borderWidth: 1,
+                        borderColor: "#E5E5E5",
+                        borderRadius: 12,
+                        overflow: "hidden",
+                        minWidth:
+                          Math.max(
+                            320,
+                            110 +
+                              measurementKeys.length *
+                                120
+                          ),
+                      }}
+                    >
+                      {/* HEADER ROW */}
+
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          backgroundColor:
+                            "#F5F5F5",
+                          borderBottomWidth: 1,
+                          borderBottomColor:
+                            "#E5E5E5",
+                        }}
+                      >
+                        {/* SIZE HEADER */}
+
+                        <View
+                          style={{
+                            width: 90,
+                            paddingVertical: 13,
+                            paddingHorizontal: 10,
+                            justifyContent:
+                              "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: "800",
+                              color: "#111111",
+                              textAlign:
+                                "center",
+                            }}
+                          >
+                            {(
+                              t("size") ||
+                              "SIZE"
+                            ).toUpperCase()}
+                          </Text>
+                        </View>
+
+                        {/* MEASUREMENT HEADERS */}
+
+                        {measurementKeys.map(
+                          (
+                            key: string
+                          ) => (
+                            <View
+                              key={`header-${key}`}
+                              style={{
+                                width: 120,
+                                paddingVertical: 13,
+                                paddingHorizontal: 8,
+                                justifyContent:
+                                  "center",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: "800",
+                                  color:
+                                    "#111111",
+                                  textAlign:
+                                    "center",
+                                }}
+                              >
+                                {String(
+                                  key
+                                ).toUpperCase()}
+                              </Text>
+                            </View>
+                          )
+                        )}
+                      </View>
+
+                      {/* DATA ROWS */}
+
+                      {rows.map(
+                        (
+                          row: any,
+                          rowIndex: number
+                        ) => (
+                          <View
+                            key={`spec-row-${rowIndex}`}
+                            style={{
+                              flexDirection:
+                                "row",
+                              minHeight: 50,
+                              backgroundColor:
+                                rowIndex %
+                                  2 ===
+                                0
+                                  ? "#FFFFFF"
+                                  : "#FAFAFA",
+                              borderBottomWidth:
+                                rowIndex ===
+                                rows.length -
+                                  1
+                                  ? 0
+                                  : 1,
+                              borderBottomColor:
+                                "#EEEEEE",
+                            }}
+                          >
+                            {/* SIZE */}
+
+                            <View
+                              style={{
+                                width: 90,
+                                paddingVertical: 13,
+                                paddingHorizontal: 10,
+                                justifyContent:
+                                  "center",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: "700",
+                                  color:
+                                    "#111111",
+                                  textAlign:
+                                    "center",
+                                }}
+                              >
+                                {String(
+                                  row?.size ||
+                                    "-"
+                                ).toUpperCase()}
+                              </Text>
+                            </View>
+
+                            {/* MEASUREMENTS */}
+
+                            {measurementKeys.map(
+                              (
+                                key: string
+                              ) => {
+                                const value =
+                                  row
+                                    ?.measurements?.[
+                                    key
+                                  ];
+
+                                return (
+                                  <View
+                                    key={`cell-${rowIndex}-${key}`}
+                                    style={{
+                                      width: 120,
+                                      paddingVertical: 13,
+                                      paddingHorizontal: 8,
+                                      justifyContent:
+                                        "center",
+                                    }}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 13,
+                                        color:
+                                          "#444444",
+                                        textAlign:
+                                          "center",
+                                      }}
+                                    >
+                                      {value !==
+                                        undefined &&
+                                      value !==
+                                        null &&
+                                      String(
+                                        value
+                                      ).trim()
+                                        ? String(
+                                            value
+                                          )
+                                        : "-"}
+                                    </Text>
+                                  </View>
+                                );
+                              }
+                            )}
+                          </View>
+                        )
+                      )}
+                    </View>
+                  </ScrollView>
+                </View>
+              );
+            }
+          )
+        ) : (
+          /* ======================================================
+             NO SIZE GUIDE
+          ====================================================== */
+
+          <View
+            style={{
+              paddingVertical: 45,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={42}
+              color="#999999"
+            />
+
+            <Text
+              style={{
+                marginTop: 12,
+                fontSize: 14,
+                fontWeight: "600",
+                color: "#777777",
+                textAlign: "center",
+              }}
+            >
+              {t("noSizeGuide") ||
+                "No size guide available for this product."}
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  </View>
+</Modal>
       <Modal
         visible={imageViewerVisible}
         animationType="fade"
@@ -1147,53 +2679,834 @@ console.log("colorImageUrls =", prodData.colorImageUrls);
         </View>
       </Modal>
 
-      <Modal
-        visible={descModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setDescModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            {/* HEADER */}
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {(t("productDetails") || "PRODUCT DETAILS").toUpperCase()}
-              </Text>
+   <Modal
+  visible={descModalVisible}
+  animationType="slide"
+  transparent={true}
+  onRequestClose={() => setDescModalVisible(false)}
+>
+  <View style={styles.productDetailsOverlay}>
 
-              <TouchableOpacity onPress={() => setDescModalVisible(false)}>
-                <Ionicons name="close" size={22} color="#111" />
-              </TouchableOpacity>
+    <View style={styles.productDetailsSheet}>
+
+      {/* =========================================================
+          HEADER
+      ========================================================= */}
+
+      <View style={styles.productDetailsHeader}>
+
+        <Text
+          style={[
+            styles.productDetailsTitle,
+            isRTL && { textAlign: "right" },
+          ]}
+        >
+          {(
+            t("productDetails") ||
+            "PRODUCT DETAILS"
+          ).toUpperCase()}
+        </Text>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() =>
+            setDescModalVisible(false)
+          }
+          style={styles.productDetailsClose}
+        >
+          <Ionicons
+            name="close"
+            size={22}
+            color="#111111"
+          />
+        </TouchableOpacity>
+
+      </View>
+
+
+      {/* =========================================================
+          SMALL SHEET HANDLE
+      ========================================================= */}
+
+      <View
+        style={
+          styles.productDetailsHandle
+        }
+      />
+
+
+      {/* =========================================================
+          EVERYTHING
+      ========================================================= */}
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={
+          styles.productDetailsContent
+        }
+      >
+
+        {/* =======================================================
+            DESCRIPTION
+        ======================================================= */}
+
+        <View
+          style={styles.detailsSection}
+        >
+
+          <Text
+            style={[
+              styles.detailsSectionTitle,
+              isRTL && {
+                textAlign: "right",
+              },
+            ]}
+          >
+            {(
+              t("description") ||
+              "DESCRIPTION"
+            ).toUpperCase()}
+          </Text>
+
+          <Text
+            style={[
+              styles.detailsDescription,
+              isRTL && {
+                textAlign: "right",
+              },
+            ]}
+          >
+            {(
+              locale === "ps"
+                ? product.descriptionPs ||
+                  product.description
+                : locale === "fa"
+                  ? product.descriptionFa ||
+                    product.description
+                  : product.description
+            ) ||
+              t("noDescription") ||
+              "No description provided."}
+          </Text>
+
+        </View>
+
+
+        {/* =======================================================
+            COLORS
+        ======================================================= */}
+
+        {Array.isArray(
+          product?.colorVariants
+        ) &&
+        product.colorVariants.length > 0 && (
+          <View
+            style={styles.detailsSection}
+          >
+
+            <Text
+              style={[
+                styles.detailsSectionTitle,
+                isRTL && {
+                  textAlign: "right",
+                },
+              ]}
+            >
+              {(
+                t("availableColors") ||
+                "AVAILABLE COLORS"
+              ).toUpperCase()}
+            </Text>
+
+
+            <View
+              style={[
+                styles.detailsColorGrid,
+                isRTL && {
+                  flexDirection:
+                    "row-reverse",
+                },
+              ]}
+            >
+
+              {product.colorVariants.map(
+                (
+                  colorVariant: any,
+                  index: number
+                ) => {
+
+                  const colorName =
+                    locale === "ps"
+                      ? colorVariant.namePs ||
+                        colorVariant.name
+                      : locale === "fa"
+                        ? colorVariant.nameFa ||
+                          colorVariant.name
+                        : colorVariant.name;
+
+                  const images =
+                    Array.isArray(
+                      colorVariant.images
+                    )
+                      ? colorVariant.images
+                      : colorVariant.imageUrl
+                        ? [
+                            colorVariant.imageUrl,
+                          ]
+                        : [];
+
+                  const previewImage =
+                    images[0] || null;
+
+
+                  return (
+                    <View
+                      key={
+                        colorVariant.id ||
+                        `detail-color-${index}`
+                      }
+                      style={
+                        styles.detailsColorItem
+                      }
+                    >
+
+                      {/* COLOR IMAGE */}
+
+                      {previewImage ? (
+                        <Image
+                          source={{
+                            uri: previewImage,
+                          }}
+                          style={
+                            styles.detailsColorImage
+                          }
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={
+                            styles.detailsColorImageFallback
+                          }
+                        >
+                          <Ionicons
+                            name="color-palette-outline"
+                            size={24}
+                            color="#999999"
+                          />
+                        </View>
+                      )}
+
+
+                      {/* COLOR NAME */}
+
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.detailsColorName,
+                          isRTL && {
+                            textAlign:
+                              "center",
+                          },
+                        ]}
+                      >
+                        {String(
+                          colorName || ""
+                        ).toUpperCase()}
+                      </Text>
+
+                    </View>
+                  );
+                }
+              )}
+
             </View>
 
-            {/* CONTENT */}
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text
-                style={[
-                  styles.modalDescription,
-                  isRTL && { textAlign: "right" },
-                ]}
-              >
-                {(locale === "ps"
-                  ? product.descriptionPs || product.description
-                  : locale === "fa"
-                    ? product.descriptionFa || product.description
-                    : product.description) ||
-                  t("noDescription") ||
-                  "No description provided."}
-              </Text>
-            </ScrollView>
-
-            {/* BOTTOM ACTION */}
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setDescModalVisible(false)}
-            >
-              <Text style={styles.modalCloseText}>{t("close") || "Close"}</Text>
-            </TouchableOpacity>
           </View>
+        )}
+
+
+        {/* =======================================================
+            AVAILABLE SIZES
+        ======================================================= */}
+
+        {Array.isArray(
+          product?.availableSizes
+        ) &&
+        product.availableSizes.length > 0 && (
+          <View
+            style={styles.detailsSection}
+          >
+
+            <Text
+              style={[
+                styles.detailsSectionTitle,
+                isRTL && {
+                  textAlign: "right",
+                },
+              ]}
+            >
+              {(
+                t("availableSizes") ||
+                "AVAILABLE SIZES"
+              ).toUpperCase()}
+            </Text>
+
+
+            <View
+              style={[
+                styles.detailsSizeRow,
+                isRTL && {
+                  flexDirection:
+                    "row-reverse",
+                },
+              ]}
+            >
+
+              {product.availableSizes.map(
+                (
+                  size: string,
+                  index: number
+                ) => (
+                  <View
+                    key={`detail-size-${size}-${index}`}
+                    style={
+                      styles.detailsSizeBox
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.detailsSizeText
+                      }
+                    >
+                      {String(
+                        size
+                      ).toUpperCase()}
+                    </Text>
+                  </View>
+                )
+              )}
+
+            </View>
+
+          </View>
+        )}
+
+
+        {/* =======================================================
+            SPECIFICATION / SIZE GUIDE TABLES
+        ======================================================= */}
+
+        {Array.isArray(
+          product?.specificationTables
+        ) &&
+        product.specificationTables.length > 0 && (
+
+          <View
+            style={styles.detailsSection}
+          >
+
+            {product.specificationTables.map(
+              (
+                table: any,
+                tableIndex: number
+              ) => {
+
+                if (
+                  table?.isActive === false
+                ) {
+                  return null;
+                }
+
+
+                const localizedTitle =
+                  locale === "ps"
+                    ? table.titlePs ||
+                      table.title
+                    : locale === "fa"
+                      ? table.titleFa ||
+                        table.title
+                      : table.title;
+
+
+                const rows =
+                  Array.isArray(
+                    table.rows
+                  )
+                    ? table.rows
+                    : [];
+
+
+                /*
+                 * Dynamically discover every
+                 * measurement column.
+                 *
+                 * Nothing is hard-coded here.
+                 */
+
+                const measurementKeys =
+                  Array.from(
+                    new Set(
+                      rows.flatMap(
+                        (row: any) =>
+                          row?.measurements &&
+                          typeof row.measurements ===
+                            "object"
+                            ? Object.keys(
+                                row.measurements
+                              )
+                            : []
+                      )
+                    )
+                  );
+
+
+                return (
+                  <View
+                    key={
+                      table.id ||
+                      `spec-table-${tableIndex}`
+                    }
+                    style={
+                      styles.detailsTableBlock
+                    }
+                  >
+
+                    {/* TABLE TITLE */}
+
+                    <Text
+                      style={[
+                        styles.detailsTableTitle,
+                        isRTL && {
+                          textAlign:
+                            "right",
+                        },
+                      ]}
+                    >
+                      {String(
+                        localizedTitle ||
+                          "PRODUCT DETAILS"
+                      ).toUpperCase()}
+                    </Text>
+
+
+                    {/* TABLE */}
+
+                    {rows.length > 0 ? (
+
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={
+                          false
+                        }
+                        style={{
+                          width: "100%",
+                        }}
+                      >
+
+                        <View
+                          style={
+                            styles.detailsTable
+                          }
+                        >
+
+                          {/* HEADER */}
+
+                          <View
+                            style={[
+                              styles.detailsTableRow,
+                              styles.detailsTableHeaderRow,
+                            ]}
+                          >
+
+                            <View
+                              style={[
+                                styles.detailsTableCell,
+                                styles.detailsTableSizeCell,
+                              ]}
+                            >
+                              <Text
+                                style={
+                                  styles.detailsTableHeaderText
+                                }
+                              >
+                                {(
+                                  t("size") ||
+                                  "SIZE"
+                                ).toUpperCase()}
+                              </Text>
+                            </View>
+
+
+                            {measurementKeys.map(
+                              (
+                                key: string
+                              ) => (
+                                <View
+                                  key={`header-${key}`}
+                                  style={
+                                    styles.detailsTableCell
+                                  }
+                                >
+                                  <Text
+                                    style={
+                                      styles.detailsTableHeaderText
+                                    }
+                                  >
+                                    {String(
+                                      key
+                                    ).toUpperCase()}
+                                  </Text>
+                                </View>
+                              )
+                            )}
+
+                          </View>
+
+
+                          {/* ROWS */}
+
+                          {rows.map(
+                            (
+                              row: any,
+                              rowIndex: number
+                            ) => (
+
+                              <View
+                                key={
+                                  row.id ||
+                                  `table-row-${rowIndex}`
+                                }
+                                style={
+                                  styles.detailsTableRow
+                                }
+                              >
+
+                                {/* SIZE */}
+
+                                <View
+                                  style={[
+                                    styles.detailsTableCell,
+                                    styles.detailsTableSizeCell,
+                                  ]}
+                                >
+                                  <Text
+                                    style={
+                                      styles.detailsTableCellText
+                                    }
+                                  >
+                                    {String(
+                                      row.size ||
+                                        "-"
+                                    ).toUpperCase()}
+                                  </Text>
+                                </View>
+
+
+                                {/* MEASUREMENTS */}
+
+                                {measurementKeys.map(
+                                  (
+                                    key: string
+                                  ) => {
+
+                                    const value =
+                                      row?.measurements?.[
+                                        key
+                                      ];
+
+                                    return (
+                                      <View
+                                        key={`${rowIndex}-${key}`}
+                                        style={
+                                          styles.detailsTableCell
+                                        }
+                                      >
+                                        <Text
+                                          style={
+                                            styles.detailsTableCellText
+                                          }
+                                        >
+                                          {value !==
+                                          undefined &&
+                                          value !==
+                                          null
+                                            ? String(
+                                                value
+                                              )
+                                            : "-"}
+                                        </Text>
+                                      </View>
+                                    );
+                                  }
+                                )}
+
+                              </View>
+                            )
+                          )}
+
+                        </View>
+
+                      </ScrollView>
+
+                    ) : (
+
+                      <Text
+                        style={
+                          styles.detailsEmptyText
+                        }
+                      >
+                        {(
+                          t("noInformation") ||
+                          "No information available."
+                        )}
+                      </Text>
+
+                    )}
+
+                  </View>
+                );
+              }
+            )}
+
+          </View>
+        )}
+
+
+        {/* =======================================================
+            PRODUCT AVAILABILITY
+        ======================================================= */}
+
+        <View
+          style={styles.detailsSection}
+        >
+
+          <Text
+            style={[
+              styles.detailsSectionTitle,
+              isRTL && {
+                textAlign: "right",
+              },
+            ]}
+          >
+            {(
+              t("productInformation") ||
+              "PRODUCT INFORMATION"
+            ).toUpperCase()}
+          </Text>
+
+
+          <View
+            style={
+              styles.detailsInfoList
+            }
+          >
+
+            <View
+              style={
+                styles.detailsInfoRow
+              }
+            >
+              <Text
+                style={
+                  styles.detailsInfoLabel
+                }
+              >
+                {(
+                  t("availability") ||
+                  "AVAILABILITY"
+                ).toUpperCase()}
+              </Text>
+
+              <Text
+                style={
+                  styles.detailsInfoValue
+                }
+              >
+                {product?.isAvailable
+                  ? (
+                      t("available") ||
+                      "AVAILABLE"
+                    ).toUpperCase()
+                  : (
+                      t("unavailable") ||
+                      "UNAVAILABLE"
+                    ).toUpperCase()}
+              </Text>
+            </View>
+
+
+          </View>
+
         </View>
-      </Modal>
+
+
+        {/* =======================================================
+            PRODUCT DESCRIPTION FALLBACK
+        ======================================================= */}
+
+        {(!product?.description &&
+          !product?.descriptionPs &&
+          !product?.descriptionFa) && (
+
+          <View
+            style={
+              styles.detailsEmptyDescription
+            }
+          >
+
+            <Text
+              style={
+                styles.detailsEmptyText
+              }
+            >
+              {(
+                t("noDescription") ||
+                "No description provided."
+              )}
+            </Text>
+
+          </View>
+
+        )}
+
+      </ScrollView>
+
+
+      {/* =========================================================
+          CLOSE BUTTON
+      ========================================================= */}
+
+      <View
+        style={
+          styles.productDetailsBottom
+        }
+      >
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={
+            styles.modalCloseBtn
+          }
+          onPress={() =>
+            setDescModalVisible(false)
+          }
+        >
+
+          <Text
+            style={
+              styles.modalCloseText
+            }
+          >
+            {(
+              t("close") ||
+              "CLOSE"
+            ).toUpperCase()}
+          </Text>
+
+        </TouchableOpacity>
+
+      </View>
+
+    </View>
+
+  </View>
+</Modal>
+
+{imageViewerVisible && (
+  <Modal
+    visible={imageViewerVisible}
+    transparent
+    animationType="fade"
+    onRequestClose={() => {
+      setImageViewerVisible(false);
+      setSelectedImageUri(null);
+    }}
+  >
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#000000",
+      }}
+    >
+      {/* CLOSE BUTTON */}
+
+      <TouchableOpacity
+        onPress={() => {
+          setImageViewerVisible(false);
+          setSelectedImageUri(null);
+        }}
+        activeOpacity={0.8}
+        style={{
+          position: "absolute",
+          top: insets.top + 12,
+          right: 18,
+          zIndex: 100,
+          width: 42,
+          height: 42,
+          borderRadius: 21,
+          backgroundColor: "rgba(255,255,255,0.12)",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons
+          name="close"
+          size={26}
+          color="#FFFFFF"
+        />
+      </TouchableOpacity>
+
+      {/* ========================================================
+          ZOOM + SWIPE GALLERY
+      ======================================================== */}
+
+      <ImageViewer
+        imageUrls={productImages.map((image: string) => ({
+          url: image,
+        }))}
+        index={Math.max(
+          0,
+          productImages.findIndex(
+            (image: string) => image === selectedImageUri
+          )
+        )}
+        enableSwipeDown
+        onSwipeDown={() => {
+          setImageViewerVisible(false);
+          setSelectedImageUri(null);
+        }}
+        onCancel={() => {
+          setImageViewerVisible(false);
+          setSelectedImageUri(null);
+        }}
+        enablePreload
+        saveToLocalByLongPress={false}
+        backgroundColor="#000000"
+        renderIndicator={(currentIndex, allSize) => (
+          <View
+            style={{
+              position: "absolute",
+              top: insets.top + 20,
+              left: 0,
+              right: 0,
+              alignItems: "center",
+            }}
+          >
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontSize: 14,
+                fontWeight: "600",
+              }}
+            >
+              {currentIndex} / {allSize}
+            </Text>
+          </View>
+        )}
+      />
+    </View>
+  </Modal>
+)}
     </View>
   );
 }
@@ -1257,6 +3570,370 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 2,
   },
+
+  // ============================================================
+// PRODUCT IMAGE GALLERY
+// ============================================================
+productDetailsOverlay: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.45)",
+  justifyContent: "flex-end",
+},
+
+productDetailsSheet: {
+  width: "100%",
+  maxHeight: "92%",
+  backgroundColor: "#FFFFFF",
+  borderTopLeftRadius: 24,
+  borderTopRightRadius: 24,
+  overflow: "hidden",
+},
+
+productDetailsHandle: {
+  alignSelf: "center",
+  width: 42,
+  height: 4,
+  borderRadius: 2,
+  backgroundColor: "#D5D5D5",
+  marginTop: 8,
+  marginBottom: 4,
+},
+
+productDetailsHeader: {
+  minHeight: 58,
+  paddingHorizontal: 18,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  borderBottomWidth: 1,
+  borderBottomColor: "#EEEEEE",
+},
+
+productDetailsTitle: {
+  fontSize: 15,
+  fontWeight: "800",
+  letterSpacing: 0.6,
+  color: "#111111",
+},
+
+productDetailsClose: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#F5F5F5",
+},
+
+productDetailsContent: {
+  paddingHorizontal: 18,
+  paddingTop: 8,
+  paddingBottom: 24,
+},
+
+detailsSection: {
+  paddingVertical: 18,
+  borderBottomWidth: 1,
+  borderBottomColor: "#EEEEEE",
+},
+
+detailsSectionTitle: {
+  fontSize: 13,
+  fontWeight: "800",
+  letterSpacing: 0.5,
+  color: "#111111",
+  marginBottom: 12,
+},
+
+detailsDescription: {
+  fontSize: 14,
+  lineHeight: 22,
+  color: "#555555",
+},
+
+/* ============================================================
+   COLORS
+============================================================ */
+
+detailsColorGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 12,
+},
+
+detailsColorItem: {
+  width: 92,
+  alignItems: "center",
+},
+
+detailsColorImage: {
+  width: 82,
+  height: 96,
+  borderRadius: 6,
+  backgroundColor: "#F5F5F5",
+},
+
+detailsColorImageFallback: {
+  width: 82,
+  height: 96,
+  borderRadius: 6,
+  backgroundColor: "#F5F5F5",
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+detailsColorName: {
+  marginTop: 7,
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#222222",
+},
+
+/* ============================================================
+   SIZES
+============================================================ */
+
+detailsSizeRow: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+},
+
+detailsSizeBox: {
+  minWidth: 52,
+  height: 38,
+  paddingHorizontal: 14,
+  borderWidth: 1,
+  borderColor: "#DDDDDD",
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+detailsSizeText: {
+  fontSize: 12,
+  fontWeight: "700",
+  color: "#222222",
+},
+
+/* ============================================================
+   TABLES
+============================================================ */
+
+detailsTableBlock: {
+  marginTop: 4,
+  marginBottom: 20,
+},
+
+detailsTableTitle: {
+  fontSize: 13,
+  fontWeight: "800",
+  color: "#111111",
+  marginBottom: 10,
+},
+
+detailsTable: {
+  borderWidth: 1,
+  borderColor: "#E1E1E1",
+  minWidth: "100%",
+},
+
+detailsTableRow: {
+  flexDirection: "row",
+  minHeight: 42,
+},
+
+detailsTableHeaderRow: {
+  backgroundColor: "#F6F6F6",
+},
+
+detailsTableCell: {
+  minWidth: 100,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRightWidth: 1,
+  borderBottomWidth: 1,
+  borderColor: "#E1E1E1",
+  justifyContent: "center",
+},
+
+detailsTableSizeCell: {
+  minWidth: 64,
+},
+
+detailsTableHeaderText: {
+  fontSize: 10,
+  fontWeight: "800",
+  color: "#222222",
+},
+
+detailsTableCellText: {
+  fontSize: 12,
+  fontWeight: "500",
+  color: "#444444",
+},
+
+/* ============================================================
+   PRODUCT INFORMATION
+============================================================ */
+
+detailsInfoList: {
+  gap: 0,
+},
+
+detailsInfoRow: {
+  minHeight: 42,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  borderBottomWidth: 1,
+  borderBottomColor: "#F0F0F0",
+},
+
+detailsInfoLabel: {
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#777777",
+},
+
+detailsInfoValue: {
+  fontSize: 12,
+  fontWeight: "700",
+  color: "#222222",
+},
+
+detailsEmptyDescription: {
+  paddingVertical: 20,
+},
+
+detailsEmptyText: {
+  fontSize: 13,
+  color: "#888888",
+  textAlign: "center",
+},
+
+/* ============================================================
+   BOTTOM
+============================================================ */
+
+productDetailsBottom: {
+  paddingHorizontal: 18,
+  paddingTop: 10,
+  paddingBottom: 16,
+  borderTopWidth: 1,
+  borderTopColor: "#EEEEEE",
+  backgroundColor: "#FFFFFF",
+},
+imagePagination: {
+  position: "absolute",
+  bottom: 14,
+  left: 0,
+  right: 0,
+  flexDirection: "row",
+  justifyContent: "center",
+  alignItems: "center",
+  gap: 5,
+},
+
+imagePaginationDot: {
+  width: 5,
+  height: 5,
+  borderRadius: 3,
+  backgroundColor: "rgba(255,255,255,0.55)",
+},
+
+imagePaginationDotActive: {
+  width: 16,
+  backgroundColor: "#FFFFFF",
+},
+
+// ============================================================
+// COLOR VISUAL SELECTOR
+// ============================================================
+
+colorOption: {
+  width: 78,
+  marginRight: 10,
+  alignItems: "center",
+},
+
+colorOptionActive: {
+  transform: [
+    {
+      scale: 1.02,
+    },
+  ],
+},
+
+colorThumbnailWrapper: {
+  width: 68,
+  height: 78,
+  borderRadius: 8,
+  backgroundColor: "#F5F5F5",
+  borderWidth: 1,
+  borderColor: "#E8E8E8",
+  overflow: "hidden",
+  position: "relative",
+},
+
+colorThumbnailWrapperActive: {
+  borderWidth: 2,
+  borderColor: "#111111",
+},
+
+colorThumbnail: {
+  width: "100%",
+  height: "100%",
+},
+
+colorThumbnailFallback: {
+  flex: 1,
+  justifyContent: "center",
+  alignItems: "center",
+  backgroundColor: "#F4F4F4",
+},
+
+colorSelectedCheck: {
+  position: "absolute",
+  right: 4,
+  top: 4,
+  width: 18,
+  height: 18,
+  borderRadius: 9,
+  backgroundColor: "#111111",
+  justifyContent: "center",
+  alignItems: "center",
+},
+
+colorOptionLabel: {
+  marginTop: 7,
+  width: 74,
+  textAlign: "center",
+  fontSize: 9,
+  fontWeight: "700",
+  color: "#777777",
+  letterSpacing: 0.3,
+},
+
+colorOptionLabelActive: {
+  color: "#111111",
+  fontWeight: "900",
+},
+
+standardColorFallback: {
+  alignSelf: "flex-start",
+  paddingHorizontal: 16,
+  paddingVertical: 11,
+  borderRadius: 8,
+  backgroundColor: "#111111",
+},
+
+standardColorFallbackText: {
+  color: "#FFFFFF",
+  fontSize: 10,
+  fontWeight: "800",
+  letterSpacing: 0.5,
+},
+
   imageViewerTitle: {
     color: "#FFFFFF",
     fontSize: 12,
