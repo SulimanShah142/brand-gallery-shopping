@@ -26,13 +26,19 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { authClient } from "@/lib/auth-client";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { API_URL } from "@/lib/config";
+import { useVisualSearch } from "@/Contexts/VisualSearchContext";
+import { generateVisualEmbedding } from "@/lib/visualEmbedding";
+import { searchProductsByEmbedding } from "@/lib/visualSearch";
+import VisualSearchLoadingOverlay from "@/components/VisualSearchLoadingOverlay";
 
 const { width } = Dimensions.get("window");
+const HERO_IMAGE_HEIGHT = Math.round(width * 1.25);
 
 
 export default function UserProductDetails() {
 const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { setResults: setVisualSearchResults } = useVisualSearch();
   const { data: session } = authClient.useSession();
   // 🎯 CORE HOOK CONTEXT BINDINGS
   const { addToCart: dispatchAddToCart } = useCart();
@@ -56,7 +62,46 @@ const { id } = useLocalSearchParams<{ id: string }>();
 const [activeImageIndex, setActiveImageIndex] = useState(0);
 const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 const [imageViewerVisible, setImageViewerVisible] = useState(false);
+const [visualScanning, setVisualScanning] = useState(false);
+const [visualSearchProgress, setVisualSearchProgress] = useState(0);
+const [visualSearchStage, setVisualSearchStage] = useState<
+  'preparing' | 'analyzing' | 'searching' | 'finishing'
+>('preparing');
+const scanSelectedImage = useCallback(async () => {
+  if (!selectedImageUri || visualScanning) return;
 
+  if (!id) {
+    Alert.alert(t('error') || 'Error', 'This product could not be identified.');
+    return;
+  }
+
+  try {
+    setVisualScanning(true);
+    setVisualSearchResults([]);
+    setVisualSearchStage('analyzing');
+    setVisualSearchProgress(35);
+    const embedding = await generateVisualEmbedding(selectedImageUri);
+    setVisualSearchStage('searching');
+    setVisualSearchProgress(70);
+    const response = await searchProductsByEmbedding(embedding, undefined, String(id));
+
+    setVisualSearchStage('finishing');
+    setVisualSearchProgress(100);
+    setVisualSearchResults(response.results);
+    setImageViewerVisible(false);
+    setSelectedImageUri(null);
+    router.push('/visual-search-results');
+  } catch (error) {
+    console.error('Visual search from product image failed:', error);
+    Alert.alert(
+      t('error') || 'Error',
+      t('visualSearchFailed') || 'Unable to scan this image right now.'
+    );
+  } finally {
+    setVisualScanning(false);
+    setVisualSearchProgress(0);
+  }
+}, [router, selectedImageUri, setVisualSearchResults, t, visualScanning]);
 
   const availableSizes = useMemo(() => {
     if (!product) return [];
@@ -118,6 +163,16 @@ const [imageViewerVisible, setImageViewerVisible] = useState(false);
 
 useEffect(() => {
   if (!id) return;
+  // Guard against improperly-encoded or invalid ids received via deep links
+  if (
+    id === 'undefined' ||
+    id === 'null' ||
+    id === '[object Object]' ||
+    String(id).trim() === ''
+  ) {
+    console.warn('Product screen received invalid id via deep link:', id);
+    return;
+  }
 
   let cancelled = false;
 
@@ -856,13 +911,8 @@ const handleColorChange = (
 
   setSelectedColor(cleanColor);
 
-  // Start the new color gallery from the beginning.
+  // Reset the gallery so the selected color starts from its first image.
   setActiveImageIndex(0);
-
-  // Close fullscreen viewer if currently open.
-  setImageViewerVisible(false);
-
-  setSelectedImageUri(null);
 };
 
 const colorOptions = useMemo(() => {
@@ -898,6 +948,161 @@ const colorSelectorOptions = useMemo(() => {
     ...colorOptions,
   ];
 }, [colorOptions]);
+
+const getColorVariant = useCallback(
+  (color: string): any | null => {
+    if (!product || !color || !Array.isArray(product.colorVariants)) return null;
+
+    const target = String(color).trim().toLowerCase();
+    return (
+      product.colorVariants.find((variant: any) => {
+        const names = [variant?.name, variant?.namePs, variant?.nameFa]
+          .filter(Boolean)
+          .map((name: string) => String(name).trim().toLowerCase());
+
+        return names.includes(target);
+      }) || null
+    );
+  },
+  [product]
+);
+
+const getColorThumbnail = useCallback(
+  (color: string): string | null => {
+    if (!product || !color) return null;
+
+    const variant = getColorVariant(color);
+    const variantImages = Array.isArray(variant?.images)
+      ? variant.images
+      : Array.isArray(variant?.imageUrl)
+        ? variant.imageUrl
+        : [];
+
+    const firstVariantImage = Array.isArray(variantImages)
+      ? variantImages[0]
+      : typeof variant?.imageUrl === "string"
+        ? variant.imageUrl
+        : null;
+
+    if (typeof firstVariantImage === "string" && firstVariantImage.trim()) {
+      return firstVariantImage.trim();
+    }
+
+    const colorImages =
+      product?.colorImages &&
+      typeof product.colorImages === "object" &&
+      !Array.isArray(product.colorImages)
+        ? product.colorImages
+        : {};
+
+    const images = colorImages?.[color];
+
+    if (Array.isArray(images) && images.length > 0) {
+      const first = images[0];
+
+      if (typeof first === "string") {
+        return first.trim();
+      }
+
+      if (first?.url) {
+        return String(first.url).trim();
+      }
+
+      if (first?.imageUrl) {
+        return String(first.imageUrl).trim();
+      }
+    }
+
+    return null;
+  },
+  [getColorVariant, product]
+);
+
+useEffect(() => {
+  if (!imageViewerVisible || selectedColor === "Standard") return;
+
+  const thumbnail = getColorThumbnail(selectedColor);
+  if (thumbnail) {
+    setSelectedImageUri(thumbnail);
+    setActiveImageIndex(0);
+  }
+}, [getColorThumbnail, imageViewerVisible, selectedColor]);
+
+const getColorHex = useCallback(
+  (color: string): string | null => {
+    if (!product || !color) return null;
+
+    const variant = getColorVariant(color);
+    const rawCode = variant?.colorCode;
+
+    if (typeof rawCode !== "string") return null;
+
+    const value = rawCode.trim();
+    return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value) ? value : null;
+  },
+  [getColorVariant, product]
+);
+
+const colorCarouselOptions = useMemo(() => {
+  if (!product) return [];
+
+  const seen = new Set<string>();
+  const items: Array<{
+    key: string;
+    name: string;
+    label: string;
+    thumbnail: string | null;
+    hex: string | null;
+  }> = [];
+
+  const pushVariant = (name: string) => {
+    const cleanName = String(name || "").trim();
+    if (!cleanName) return;
+
+    const normalized = cleanName.toLowerCase();
+    if (seen.has(normalized)) return;
+
+    const thumbnail = getColorThumbnail(cleanName);
+    const hex = getColorHex(cleanName);
+
+    if (!thumbnail && !hex) return;
+
+    seen.add(normalized);
+    items.push({
+      key: normalized,
+      name: cleanName,
+      label:
+        locale === "ps"
+          ? product?.availableColorsPs?.[colorOptions.findIndex((color) => color.toLowerCase() === normalized)] || cleanName
+          : locale === "fa"
+            ? product?.availableColorsFa?.[colorOptions.findIndex((color) => color.toLowerCase() === normalized)] || cleanName
+            : cleanName,
+      thumbnail,
+      hex,
+    });
+  };
+
+  if (Array.isArray(product.colorVariants)) {
+    product.colorVariants.forEach((variant: any) => {
+      const name = String(variant?.name || "").trim();
+      if (name) pushVariant(name);
+    });
+  }
+
+  if (items.length === 0) {
+    const rawColors = Array.isArray(product.availableColors) ? product.availableColors : [];
+    rawColors.forEach((item: any) => {
+      if (typeof item !== "string") return;
+      item
+        .split(",")
+        .map((value: string) => value.trim())
+        .filter(Boolean)
+        .forEach((colorName) => pushVariant(colorName));
+    });
+  }
+
+  return items;
+}, [colorOptions, getColorHex, getColorThumbnail, locale, product]);
 
 const getLocalizedColorName = (
   color: string,
@@ -1121,20 +1326,31 @@ const productImages = useMemo(() => {
       ? product.imageUrl.trim()
       : "";
 
-  // ------------------------------------------------------------
-  // STANDARD = ORIGINAL PRODUCT
-  // ------------------------------------------------------------
+  const orderedImages: string[] = [];
+  const seen = new Set<string>();
 
-  if (
-    !selectedColor ||
-    selectedColor.toLowerCase() === "standard"
-  ) {
-    return mainImage ? [mainImage] : [];
+  const addUniqueImage = (value: any) => {
+    if (!value) return;
+
+    const image = typeof value === "string"
+      ? value.trim()
+      : typeof value?.url === "string"
+        ? value.url.trim()
+        : typeof value?.imageUrl === "string"
+          ? value.imageUrl.trim()
+          : "";
+    if (!image) return;
+
+    const key = image.toLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    orderedImages.push(image);
+  };
+
+  if (mainImage) {
+    addUniqueImage(mainImage);
   }
-
-  // ------------------------------------------------------------
-  // SELECTED COLOR IMAGES
-  // ------------------------------------------------------------
 
   const colorImages =
     product.colorImages &&
@@ -1142,31 +1358,107 @@ const productImages = useMemo(() => {
       ? product.colorImages
       : {};
 
-  const selectedKey = Object.keys(colorImages).find(
-    (key) =>
-      String(key).trim().toLowerCase() ===
-      String(selectedColor).trim().toLowerCase()
-  );
-
-  if (!selectedKey) {
-    return mainImage ? [mainImage] : [];
-  }
-
-  const images = Array.isArray(colorImages[selectedKey])
-    ? colorImages[selectedKey]
-        .map((image: any) => String(image).trim())
-        .filter(Boolean)
+  const colorNames = Array.isArray(product.availableColors)
+    ? product.availableColors
+        .flatMap((item: any) =>
+          typeof item === "string"
+            ? item
+                .split(",")
+                .map((value: string) => value.trim())
+                .filter(Boolean)
+            : []
+        )
+        .filter(
+          (color: string, index: number, arr: string[]) =>
+            arr.findIndex((entry) => entry.toLowerCase() === color.toLowerCase()) === index
+        )
     : [];
 
-  // ------------------------------------------------------------
-  // NEVER RETURN EMPTY GALLERY
-  // ------------------------------------------------------------
+  const variantEntries = Array.isArray(product.colorVariants)
+    ? product.colorVariants
+    : [];
 
-  return images.length > 0
-    ? [...new Set(images)]
-    : mainImage
-      ? [mainImage]
+  const selectedColorName = String(selectedColor || "").trim().toLowerCase();
+  if (selectedColorName && selectedColorName !== "standard") {
+    const selectedImages: string[] = [];
+
+    for (const colorName of colorNames) {
+      if (colorName.toLowerCase() !== selectedColorName) continue;
+
+      const mappedImages = Array.isArray(colorImages[colorName])
+        ? colorImages[colorName]
+        : [];
+      mappedImages.forEach((image: any) => addUniqueImage(image));
+      mappedImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
+
+      const variant = variantEntries.find((entry: any) => {
+        const names = [entry?.name, entry?.namePs, entry?.nameFa]
+          .filter(Boolean)
+          .map((value: string) => String(value).trim().toLowerCase());
+        return names.includes(selectedColorName);
+      });
+      const variantImages = Array.isArray(variant?.images)
+        ? variant.images
+        : typeof variant?.imageUrl === "string"
+          ? [variant.imageUrl]
+          : [];
+      variantImages.forEach((image: any) => addUniqueImage(image));
+      variantImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
+    }
+
+    const selectedImageSet = new Set(selectedImages.filter(Boolean).map((image) => image.toLowerCase()));
+    const selectedGallery = orderedImages.filter((image) => selectedImageSet.has(image.toLowerCase()));
+    if (selectedGallery.length > 0) return selectedGallery;
+  }
+
+  for (const colorName of colorNames) {
+    const mappedImages = Array.isArray(colorImages[colorName])
+      ? colorImages[colorName]
       : [];
+
+    if (mappedImages.length > 0) {
+      mappedImages.forEach((image: any) => addUniqueImage(image));
+      continue;
+    }
+
+    const variant = variantEntries.find((entry: any) => {
+      const names = [entry?.name, entry?.namePs, entry?.nameFa]
+        .filter(Boolean)
+        .map((value: string) => String(value).trim().toLowerCase());
+
+      return names.includes(String(colorName).trim().toLowerCase());
+    });
+
+    const variantImages = Array.isArray(variant?.images)
+      ? variant.images
+      : typeof variant?.imageUrl === "string"
+        ? [variant.imageUrl]
+        : [];
+
+    variantImages.forEach((image: any) => addUniqueImage(image));
+  }
+
+  if (orderedImages.length === 0) {
+    const fallbackVariantImages = Array.isArray(product.colorVariants)
+      ? product.colorVariants.flatMap((variant: any) => {
+          const images = Array.isArray(variant?.images)
+            ? variant.images
+            : typeof variant?.imageUrl === "string"
+              ? [variant.imageUrl]
+              : [];
+
+          return images.map((image: any) => String(image).trim()).filter(Boolean);
+        })
+      : [];
+
+    fallbackVariantImages.forEach((image: string) => addUniqueImage(image));
+  }
+
+  if (orderedImages.length === 0 && mainImage) {
+    addUniqueImage(mainImage);
+  }
+
+  return orderedImages;
 }, [product, selectedColor]);
 
 
@@ -1175,41 +1467,6 @@ const productImages = useMemo(() => {
     setSelectedImageUri(uri);
     setImageViewerVisible(true);
   }, []);
-
-const getColorThumbnail = useCallback(
-  (color: string): string | null => {
-    if (!product || !color) return null;
-
-    const colorImages =
-      product?.colorImages &&
-      typeof product.colorImages === "object" &&
-      !Array.isArray(product.colorImages)
-        ? product.colorImages
-        : {};
-
-    const images = colorImages?.[color];
-
-    if (Array.isArray(images) && images.length > 0) {
-      const first = images[0];
-
-      if (typeof first === "string") {
-        return first;
-      }
-
-      if (first?.url) {
-        return String(first.url);
-      }
-
-      if (first?.imageUrl) {
-        return String(first.imageUrl);
-      }
-    }
-
-    return null;
-  },
-  [product]
-);
-
 
   const renderStars = (rating: number, interactive = false) => {
     return Array.from({ length: 5 }, (_, i) => (
@@ -1450,13 +1707,14 @@ const getColorThumbnail = useCallback(
         {/* ============================================================
     PRODUCT IMAGE GALLERY
 ============================================================ */}
-<View
-  style={[
-    styles.heroContainer,
-    {
-      direction: "ltr",
-    },
-  ]}
+    <View
+      style={[
+        styles.heroContainer,
+        {
+          direction: "ltr",
+          height: HERO_IMAGE_HEIGHT,
+        },
+      ]}
 >
   {/* FULLSCREEN BUTTON */}
 
@@ -1514,7 +1772,7 @@ const getColorThumbnail = useCallback(
     >
       {productImages.map(
         (image: string, index: number) => (
-          <TouchableOpacity
+            <TouchableOpacity
             key={`${selectedColor}-${index}-${image}`}
             activeOpacity={0.98}
             onPress={() => {
@@ -1523,7 +1781,7 @@ const getColorThumbnail = useCallback(
             }}
             style={{
               width,
-              height: 420,
+              height: HERO_IMAGE_HEIGHT,
             }}
           >
             <Image
@@ -1544,7 +1802,7 @@ const getColorThumbnail = useCallback(
     <View
       style={{
         width,
-        height: 420,
+        height: HERO_IMAGE_HEIGHT,
         alignItems: "center",
         justifyContent: "center",
       }}
@@ -1624,31 +1882,7 @@ const getColorThumbnail = useCallback(
                 : `AFN ${toLocalNumbers(finalDisplayPrice.toLocaleString("en-US"))}`}
             </Text>
 
-            <View style={[styles.benefitsRow]}>
-              <View
-                style={[
-                  styles.benefitPill,
-                  isRTL && { flexDirection: "row-reverse" },
-                ]}
-              >
-                <Ionicons name="car-outline" size={14} color="#000000" />
-                <Text style={styles.benefitText}>
-                  {t("freeDelivery") || "Free Delivery"}
-                </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.benefitPill,
-                  isRTL && { flexDirection: "row-reverse" },
-                ]}
-              >
-                <Ionicons name="refresh-outline" size={14} color="#000000" />
-                <Text style={styles.benefitText}>
-                  {t("easyReturns") || "Easy Returns"}
-                </Text>
-              </View>
-            </View>
+            {/* benefits removed per design request */}
 
             {(Array.isArray(product?.availableSizes) && product.availableSizes.length > 0) ? (
               <>
@@ -1699,223 +1933,78 @@ const getColorThumbnail = useCallback(
             {/* =========================
                   COLOR SELECTOR WITH EXTRACTED ARRAYS LOOKUPS
             ========================= */}
-         {/* ============================================================
-    COLOR SELECTOR
-============================================================ */}
-{/* ============================================================
-    COLOR SELECTOR
-============================================================ */}
+            {colorCarouselOptions.length > 0 ? (
+              <View style={styles.colorSelectorWrapper}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{
+                    paddingVertical: 8,
+                    paddingRight: 16,
+                    paddingLeft: 2,
+                    gap: 12,
+                  }}
+                  style={{ marginTop: 2 }}
+                >
+                  {colorCarouselOptions.map((colorOption) => {
+                    const isSelected = selectedColor === colorOption.name;
 
-<View
-  style={[
-    styles.sizeMatrixHeader,
-    {
-      marginTop: 18,
-    },
-    isRTL && {
-      flexDirection: "row-reverse",
-    },
-  ]}
->
-  <Text
-    style={[
-      styles.sizeSectionTitle,
-      isRTL && {
-        textAlign: "right",
-      },
-    ]}
-  >
-    {(t("selectColor") || "SELECT COLOR").toUpperCase()}
-  </Text>
+                    return (
+                      <TouchableOpacity
+                        key={`color-${colorOption.key}`}
+                        activeOpacity={0.85}
+                        onPress={() => handleColorChange(colorOption.name)}
+                        style={[
+                          styles.colorOption,
+                          isSelected && styles.colorOptionActive,
+                        ]}
+                      >
+                        {colorOption.thumbnail ? (
+                          <Image
+                            source={{ uri: colorOption.thumbnail }}
+                            style={{ width: 56, height: 56, borderRadius: 6 }}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View
+                            style={{
+                              width: 56,
+                              height: 56,
+                              borderRadius: 28,
+                              backgroundColor: colorOption.hex || "#E5E7EB",
+                              borderWidth: isSelected ? 2 : 1,
+                              borderColor: isSelected ? "#111111" : "#D1D5DB",
+                            }}
+                          />
+                        )}
 
-  {selectedColor ? (
-    <Text
-      style={[
-        styles.selectedColorLabel,
-        isRTL && {
-          textAlign: "left",
-        },
-      ]}
-    >
-      {selectedColor.toUpperCase()}
-    </Text>
-  ) : null}
-</View>
-
-{/* ============================================================
-    SHEIN-STYLE HORIZONTAL COLOR SELECTOR
-    TEXT ONLY — NO COLOR IMAGES
-============================================================ */}
-
-<ScrollView
-  horizontal
-  showsHorizontalScrollIndicator={false}
-  contentContainerStyle={{
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 2,
-    paddingRight: 18,
-    gap: 8,
-  }}
-  style={{
-    marginTop: 2,
-  }}
->
-  {colorSelectorOptions.map(
-    (color: string, index: number) => {
-      const isStandard =
-        color.toLowerCase() === "standard";
-
-      const isSelected =
-        selectedColor.toLowerCase() ===
-        color.toLowerCase();
-
-      const localizedLabel =
-        getLocalizedColorName(
-          color,
-          index - 1
-        );
-
-      return (
-        <TouchableOpacity
-          key={`color-option-${color}-${index}`}
-          activeOpacity={0.85}
-          onPress={() =>
-            handleColorChange(color)
-          }
-          style={[
-            styles.sizeItemBox,
-            {
-              flex: 0,
-              minWidth: 82,
-              paddingHorizontal: 16,
-              marginRight: 0,
-            },
-            isSelected &&
-              styles.sizeItemBoxActive,
-          ]}
-        >
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.sizeText,
-              isSelected &&
-                styles.sizeTextActive,
-            ]}
-          >
-            {String(
-              localizedLabel
-            ).toUpperCase()}
-          </Text>
-        </TouchableOpacity>
-      );
-    }
-  )}
-</ScrollView>
-
-{/* ============================================================
-    HORIZONTAL COLOR NAME SELECTOR
-============================================================ */}
-
-{/* HORIZONTAL COLOR GALLERY */}
-
-{Array.isArray(product?.availableColors) &&
-product.availableColors.length > 0 ? (
-  <ScrollView
-    horizontal
-    showsHorizontalScrollIndicator={false}
-    contentContainerStyle={{
-      paddingVertical: 8,
-      paddingRight: 16,
-      paddingLeft: 2,
-    }}
-    style={{
-      marginTop: 2,
-    }}
-  >
-    {product.availableColors
-      .flatMap((item: any) =>
-        typeof item === "string"
-          ? item
-              .split(",")
-              .map((v) => v.trim())
-              .filter(Boolean)
-          : [item]
-      )
-      .map(
-        (
-          rawColor: string,
-          index: number
-        ) => {
-          const colorInEnglish =
-            String(rawColor).trim();
-
-          if (!colorInEnglish) {
-            return null;
-          }
-
-          const isSelected =
-            selectedColor === colorInEnglish;
-
-          const thumbnail =
-            getColorThumbnail(
-              colorInEnglish
-            );
-
-          const localizedColorLabel =
-            locale === "ps"
-              ? product.availableColorsPs?.[
-                  index
-                ] ||
-                colorInEnglish
-              : locale === "fa"
-                ? product.availableColorsFa?.[
-                    index
-                  ] ||
-                  colorInEnglish
-                : colorInEnglish;
-
-          return (
-            <TouchableOpacity
-              key={`color-${colorInEnglish}-${index}`}
-              activeOpacity={0.85}
-              onPress={() =>
-                handleColorChange(
-                  colorInEnglish
-                )
-              }
-              style={[
-                styles.colorOption,
-                isSelected &&
-                  styles.colorOptionActive,
-              ]}
-            >
-              {/* COLOR IMAGE */}
-
-        
-
-              {/* COLOR NAME */}
-
-            </TouchableOpacity>
-          );
-        }
-      )}
-  </ScrollView>
-) : (
-  <View
-    style={[
-      styles.standardColorFallback,
-      isRTL && {
-        alignSelf: "flex-end",
-      },
-    ]}
-  >
-    <Text style={styles.standardColorFallbackText}>
-      {(t("standardColor") || "STANDARD").toUpperCase()}
-    </Text>
-  </View>
-)}
+                        <Text
+                          style={{
+                            marginTop: 6,
+                            fontSize: 11,
+                            color: isSelected ? "#111" : "#666",
+                          }}
+                          numberOfLines={1}
+                        >
+                          {String(colorOption.label || colorOption.name).toUpperCase()}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : (
+              <View
+                style={[
+                  styles.standardColorFallback,
+                  isRTL && { alignSelf: "flex-end" },
+                ]}
+              >
+                <Text style={styles.standardColorFallbackText}>
+                  {(t("standardColor") || "STANDARD").toUpperCase()}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* =========================
@@ -2644,32 +2733,6 @@ product.availableColors.length > 0 ? (
     </View>
   </View>
 </Modal>
-      <Modal
-        visible={imageViewerVisible}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setImageViewerVisible(false)}
-      >
-        <View style={styles.imageViewerOverlay}>
-          <View style={styles.imageViewerHeader}>
-            <Text style={styles.imageViewerTitle}>
-              {(t("productDetails") || "PRODUCT IMAGE").toUpperCase()}
-            </Text>
-            <TouchableOpacity onPress={() => setImageViewerVisible(false)}>
-              <Ionicons name="close" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-
-          {selectedImageUri ? (
-            <Image
-              source={{ uri: selectedImageUri }}
-              style={styles.imageViewerImage}
-              resizeMode="contain"
-            />
-          ) : null}
-        </View>
-      </Modal>
-
    <Modal
   visible={descModalVisible}
   animationType="slide"
@@ -3447,6 +3510,40 @@ product.availableColors.length > 0 ? (
         />
       </TouchableOpacity>
 
+      <TouchableOpacity
+        onPress={scanSelectedImage}
+        disabled={visualScanning}
+        activeOpacity={0.85}
+        style={{
+          position: "absolute",
+          top: insets.top + 12,
+          left: 18,
+          zIndex: 100,
+          minWidth: 108,
+          height: 42,
+          paddingHorizontal: 14,
+          borderRadius: 21,
+          backgroundColor: visualScanning
+            ? "rgba(255,255,255,0.22)"
+            : "rgba(255,255,255,0.96)",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+        }}
+      >
+        {visualScanning ? (
+          <ActivityIndicator size="small" color="#111111" />
+        ) : (
+          <Ionicons name="scan-outline" size={18} color="#111111" />
+        )}
+        <Text style={{ color: "#111111", fontSize: 12, fontWeight: "800" }}>
+          {visualScanning
+            ? (t("scanning") || "SCANNING")
+            : (t("scan") || "SCAN")}
+        </Text>
+      </TouchableOpacity>
+
       {/* ========================================================
           ZOOM + SWIPE GALLERY
       ======================================================== */}
@@ -3474,30 +3571,68 @@ product.availableColors.length > 0 ? (
         saveToLocalByLongPress={false}
         backgroundColor="#000000"
         renderIndicator={(currentIndex, allSize) => (
-          <View
-            style={{
-              position: "absolute",
-              top: insets.top + 20,
-              left: 0,
-              right: 0,
-              alignItems: "center",
-            }}
-          >
-            <Text
+          (() => {
+            const totalImages = Math.max(1, allSize ?? productImages.length);
+            const displayIndex = Math.min(
+              Math.max(1, (currentIndex ?? 0) + 1),
+              totalImages
+            );
+
+            return (
+              <View
               style={{
-                color: "#FFFFFF",
-                fontSize: 14,
-                fontWeight: "600",
+                  position: "absolute",
+                  top: insets.top + 20,
+                  left: 0,
+                  right: 0,
+                  alignItems: "center",
               }}
-            >
-              {currentIndex} / {allSize}
-            </Text>
-          </View>
+              >
+                <Text
+                  style={{
+                    color: "#FFFFFF",
+                    fontSize: 14,
+                    fontWeight: "600",
+                  }}
+                >
+                  {displayIndex} / {totalImages}
+                </Text>
+              </View>
+            );
+          })()
         )}
+      />
+
+      {colorOptions.length > 0 && (
+        <View style={{ position: 'absolute', left: 0, right: 0, bottom: insets.bottom + 30, alignItems: 'center' }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
+            {colorOptions.map((colorLabel: string) => {
+              const thumb = getColorThumbnail(colorLabel);
+
+              if (!thumb) return null;
+
+              return (
+                <TouchableOpacity key={`viewer-color-${colorLabel}`} activeOpacity={0.85} onPress={() => handleColorChange(colorLabel)} style={{ alignItems: 'center', marginHorizontal: 6 }}>
+                  <Image source={{ uri: thumb }} style={{ width: 56, height: 56, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }} />
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      <VisualSearchLoadingOverlay
+        visible={visualScanning}
+        imageUri={selectedImageUri}
+        progress={visualSearchProgress}
+        stage={visualSearchStage}
+        locale={locale}
+        dark
       />
     </View>
   </Modal>
 )}
+
     </View>
   );
 }

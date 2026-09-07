@@ -9,12 +9,15 @@ import { useCart } from '@/Contexts/CartContext';
 import { useBadges } from '@/Contexts/BadgeContext';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { HomeTabProvider, useHomeTab } from '@/Contexts/HomeTabContext';
+import { VisualSearchProvider } from '@/Contexts/VisualSearchContext';
 
 
 export default function ShopLayout() {
   return (
     <HomeTabProvider>
+      <VisualSearchProvider>
       <ShopLayoutContent />
+      </VisualSearchProvider>
     </HomeTabProvider>
   );
 }
@@ -318,6 +321,10 @@ function ShopLayoutContent() {
           options={{ href: null }}
         />
 
+  <Tabs.Screen
+          name="visual-search-results"
+          options={{ href: null }}
+        />
         <Tabs.Screen
           name="profile"
           options={{ href: null }}

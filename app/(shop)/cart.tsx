@@ -182,11 +182,13 @@ const calculateTotal = useMemo(() => {
 // ============================================================
 
 const freeDeliveryThreshold = useMemo(() => {
-  return Number(
+  const value = Number(
     settings?.freeDeliveryThreshold ??
     settings?.free_delivery_threshold ??
     2000
   );
+
+  return Number.isFinite(value) ? value : 2000;
 }, [settings]);
 
 

@@ -46,50 +46,49 @@ export default function Boot() {
 
     const bootstrap = async () => {
       try {
-        // ================================================
-        // ONE SIGNAL
-        // ================================================
+        // Wrap OneSignal init to catch any unexpected errors
+        try {
+          if (!oneSignalInitialized) {
+            oneSignalInitialized = true;
 
-        if (!oneSignalInitialized) {
-          oneSignalInitialized = true;
-
-          try {
             OneSignal.initialize(SHOPPER_USER_APP_ID);
-            await OneSignal.Notifications.requestPermission(true);
-          } catch (err) {
-            console.log("OneSignal init failed:", err);
+            // Do not await permission request here to avoid blocking startup
+            OneSignal.Notifications.requestPermission(true).catch((err) => {
+              console.log('OneSignal permission request failed:', err);
+            });
           }
+        } catch (err) {
+          console.log('OneSignal initialization safe-catch:', err);
         }
 
-        // ================================================
-        // AUTH CLIENT
-        // ================================================
-
+        // Initialize auth client safely
         try {
           await authClient.initClientAsync();
-        } catch {}
+        } catch (err) {
+          console.log('authClient.initClientAsync failed:', err);
+        }
 
         // ================================================
         // LOAD LOCAL STORAGE
         // ================================================
 
-        const [
-          token,
-          cachedUserString,
-          guestModeValue,
-        ] = await Promise.all([
-          SecureStore.getItemAsync(
-            "custom_user_session_token"
-          ).catch(() => null),
+        let token = null;
+        let cachedUserString = null;
+        let guestModeValue = null;
 
-          SecureStore.getItemAsync(
-            "cached_user_profile"
-          ).catch(() => null),
-
-          SecureStore.getItemAsync(
-            "guest_mode"
-          ).catch(() => null),
-        ]);
+        try {
+          [
+            token,
+            cachedUserString,
+            guestModeValue,
+          ] = await Promise.all([
+            SecureStore.getItemAsync("custom_user_session_token").catch(() => null),
+            SecureStore.getItemAsync("cached_user_profile").catch(() => null),
+            SecureStore.getItemAsync("guest_mode").catch(() => null),
+          ]);
+        } catch (err) {
+          console.log('SecureStore read failed:', err);
+        }
 
         const isGuest =
           guestModeValue === "true";
@@ -108,7 +107,9 @@ export default function Boot() {
             console.log("👤 Launching in Guest Mode");
           }
 
-          safeReplace("/(shop)");
+          if (segments[0] == null) {
+            safeReplace("/(shop)");
+          }
           return;
         }
 
@@ -145,9 +146,14 @@ export default function Boot() {
 
         // ================================================
         // ENTER APP IMMEDIATELY
+        // Only navigate to the shop when there is no pre-existing
+        // route (for example an incoming deep link). This prevents
+        // overriding the initial deep link handling.
         // ================================================
 
-        safeReplace("/(shop)");
+        if (segments[0] == null) {
+          safeReplace("/(shop)");
+        }
 
         // ================================================
         // BACKGROUND SESSION REFRESH
@@ -220,13 +226,15 @@ export default function Boot() {
             ),
           ]);
 
-          if (token && cachedUser) {
+            if (token && cachedUser) {
             authClient.setSessionData({
               token,
               user: JSON.parse(cachedUser),
             });
 
-            safeReplace("/(shop)");
+              if (segments[0] == null) {
+                safeReplace("/(shop)");
+              }
             return;
           }
 

@@ -5,20 +5,35 @@ import React, { useState, useEffect, useCallback, useMemo, useRef,   createConte
 import {
   ScrollView, TouchableOpacity, Text, StyleSheet, View, 
   Dimensions, RefreshControl, TextInput, ActivityIndicator,
-  FlatList
+  FlatList,   Modal,   Animated,
+  Easing,
+  Image,
+  InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { 
   initOfflineDb, loadCategoriesLocal, loadProductsLocal, 
-  syncRemoteCatalog, isOnline, execSql, fetchAndSyncProducts, shuffleArray 
+  fetchRemoteCategories, isOnline, execSql, fetchAndSyncProducts, shuffleArray 
 } from '@/lib/offline';
 import { useLanguage } from '@/Contexts/LanguageContext';
 import CachedImage from '@/components/CachedImage';
 import SkeletonGrid from '@/components/SkeletonGrid';
+import VisualSearchLoadingOverlay from '@/components/VisualSearchLoadingOverlay';
 import { API_URL } from "@/lib/config";
 import { useHomeTab } from '@/Contexts/HomeTabContext';
-
+import * as ImagePicker from 'expo-image-picker';
+import { useVisualSearch } from '@/Contexts/VisualSearchContext';
+import {
+  searchHomeProductsByEmbedding,
+} from '@/lib/visualSearch';
+import {
+  generateVisualEmbedding,
+  preloadVisualEmbeddingModel,
+} from '@/lib/visualEmbedding';
+import {
+  runVisualParityTest,
+} from '@/lib/visualParityTest';
 const { width } = Dimensions.get('window');
 // Premium 2-column calculation spacing accounts for side edge insets
 const PRODUCT_CARD_WIDTH = (width - 42) / 2; 
@@ -28,9 +43,24 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function HomePage() {
   const router = useRouter();
+  const {
+  setResults: setVisualSearchResults,
+} = useVisualSearch();
+const [visualSearchImage, setVisualSearchImage] =
+  useState<string | null>(null);
+const [visualSearchProgress, setVisualSearchProgress] = useState(0);
+const [visualSearchStage, setVisualSearchStage] = useState<
+  'preparing' | 'analyzing' | 'searching' | 'finishing'
+>('preparing');
+
+const visualScanAnim = useRef(
+  new Animated.Value(0)
+).current;
   const { t, isRTL, locale} = useLanguage();
   const isMounted = useRef(true);
   const searchInputRefValue = useRef('');
+  const [visualSearching, setVisualSearching] =
+  useState(false);
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [advertisements, setAdvertisements] = useState<any[]>([]);
 const homeListRef = useRef<FlatList>(null);
@@ -40,6 +70,10 @@ const {
   registerHomeActions,
 } = useHomeTab();
 const catalogSyncInProgressRef = useRef(false);
+const [visualSearchModalVisible, setVisualSearchModalVisible] = useState(false);
+const [visualSearchCategoryModalVisible, setVisualSearchCategoryModalVisible] = useState(false);
+const [visualSearchCategoryId, setVisualSearchCategoryId] = useState<string | null>(null);
+
 
 
   const getLocalizedCategoryLabel = (cat: any) =>
@@ -50,12 +84,255 @@ const homeSearchInputRef = useRef<TextInput>(null);
   const [categories, setCategories] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
-  const [displayLimit, setDisplayLimit] = useState(12); 
+  const [displayLimit, setDisplayLimit] = useState(20);
+  const [productPage, setProductPage] = useState(1);
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
+  const [hasMoreProducts, setHasMoreProducts] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [remoteSyncing, setRemoteSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+
+
+  const startVisualScanner = useCallback(() => {
+  visualScanAnim.setValue(0);
+
+  Animated.loop(
+    Animated.sequence([
+      Animated.timing(visualScanAnim, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(visualScanAnim, {
+        toValue: 0,
+        duration: 1800,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      }),
+    ])
+  ).start();
+}, [visualScanAnim]);
+
+const performVisualSearch = useCallback(
+  async (imageUri: string, categoryId: string) => {
+    if (!imageUri) {
+      return;
+    }
+
+    try {
+      setVisualSearching(true);
+      setVisualSearchImage(imageUri);
+      setVisualSearchResults([]);
+
+      console.log(
+        '🔎 Starting visual search:',
+        imageUri
+      );
+
+      // ======================================================
+      // STEP 1 — IMAGE → 128-D EMBEDDING ON DEVICE
+      // ======================================================
+
+      setVisualSearchStage('analyzing');
+      setVisualSearchProgress(35);
+
+      const embedding =
+        await generateVisualEmbedding(
+          imageUri
+        );
+
+      console.log(
+        '🧠 Embedding ready:',
+        {
+          dimension:
+            embedding.length,
+        }
+      );
+
+      // ======================================================
+      // STEP 2 — EMBEDDING → BACKEND → PGVECTOR
+      // ======================================================
+
+      setVisualSearchStage('searching');
+      setVisualSearchProgress(70);
+
+      const response =
+        await searchHomeProductsByEmbedding(embedding, categoryId);
+
+      console.log(
+        '🔎 Visual search completed:',
+        {
+          count:
+            response.results.length,
+          requestId:
+            response.requestId,
+          model:
+            response.query.model,
+          version:
+            response.query.version,
+        }
+      );
+
+      // ======================================================
+      // STEP 3 — SAVE RESULTS
+      // ======================================================
+
+      setVisualSearchStage('finishing');
+      setVisualSearchProgress(100);
+
+      setVisualSearchResults(
+        response.results
+      );
+
+      router.push(
+        '/visual-search-results'
+      );
+
+    } catch (error) {
+      console.error(
+        '❌ Visual search failed:',
+        error
+      );
+
+    } finally {
+      if (isMounted.current) {
+        setVisualSearching(false);
+      }
+    }
+  },
+  [
+    router,
+    setVisualSearchResults,
+    visualSearchCategoryId,
+  ]
+);
+
+
+const handleOpenVisualSearch = useCallback(() => {
+  setVisualSearchCategoryModalVisible(true);
+}, []);
+
+const handleSelectVisualSearchCategory = useCallback((categoryId: string) => {
+  setVisualSearchCategoryId(categoryId);
+  setVisualSearchCategoryModalVisible(false);
+  setVisualSearchModalVisible(true);
+}, []);
+
+const handleRunVisualParityTest = useCallback(async () => {
+  setVisualSearchModalVisible(false);
+
+  try {
+    await runVisualParityTest();
+  } catch (error) {
+    console.error(
+      '❌ Visual parity test failed:',
+      error
+    );
+  }
+}, []);
+
+const handleTakePhoto = useCallback(
+  async () => {
+    try {
+      const permission =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        console.warn('📷 Camera permission denied');
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 0.9,
+        });
+
+      if (
+        result.canceled ||
+        !result.assets?.length
+      ) {
+        return;
+      }
+
+      const imageUri = result.assets[0]?.uri;
+
+      if (!imageUri) {
+        return;
+      }
+
+      setVisualSearchModalVisible(false);
+
+      await performVisualSearch(imageUri, visualSearchCategoryId || '');
+
+    } catch (error) {
+      console.error(
+        '❌ Camera visual search failed:',
+        error
+      );
+
+      setVisualSearching(false);
+    }
+  },
+  [performVisualSearch, visualSearchCategoryId]
+);
+
+
+const handlePickImage = useCallback(
+  async () => {
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        console.warn('🖼️ Gallery permission denied');
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 0.9,
+        });
+
+      if (
+        result.canceled ||
+        !result.assets?.length
+      ) {
+        return;
+      }
+
+      const imageUri = result.assets[0]?.uri;
+
+      if (!imageUri) {
+        return;
+      }
+
+      setVisualSearchModalVisible(false);
+
+      console.log(
+        '🖼️ Visual search image selected:',
+        imageUri
+      );
+
+      await performVisualSearch(imageUri, visualSearchCategoryId || '');
+
+    } catch (error) {
+      console.error(
+        '❌ Gallery visual search failed:',
+        error
+      );
+
+      setVisualSearching(false);
+    }
+  },
+  [performVisualSearch, visualSearchCategoryId]
+);
 
 const safeFetchAndSyncProducts = useCallback(
   async (limit = 50, page = 1) => {
@@ -84,12 +361,40 @@ const safeFetchAndSyncProducts = useCallback(
   []
 );
 
+const loadMoreProducts = useCallback(async () => {
+  if (loadingMoreProducts || !hasMoreProducts) return;
+
+  setLoadingMoreProducts(true);
+  const nextPage = productPage + 1;
+
+  try {
+    const nextProducts = await safeFetchAndSyncProducts(20, nextPage);
+
+    if (!isMounted.current) return;
+
+    setHasMoreProducts(nextProducts.length === 20);
+    setProductPage(nextPage);
+
+    if (nextProducts.length > 0) {
+      setProducts((currentProducts) => {
+        const existingIds = new Set(currentProducts.map((product) => String(product.id)));
+        return [
+          ...currentProducts,
+          ...nextProducts.filter((product: any) => !existingIds.has(String(product.id))),
+        ];
+      });
+      setDisplayLimit((currentLimit) => Math.max(currentLimit, nextPage * 20));
+    }
+  } finally {
+    if (isMounted.current) setLoadingMoreProducts(false);
+  }
+}, [hasMoreProducts, loadingMoreProducts, productPage, safeFetchAndSyncProducts]);
+
 
   // 🎯 THE STABLE SECURED ATOMIC SYSTEM LOADER (HOME VIEW)
   const handleLoadData = useCallback(async (isInitialLoad = false) => {
     let online = false;
     let hasLocalData = false;
-    let remoteSyncAttempted = false;
 
     try {
       if (isInitialLoad) {
@@ -129,112 +434,32 @@ const safeFetchAndSyncProducts = useCallback(
 
       online = await isOnline().catch(() => false);
 
-   if (!hasLocalData && online) {
-  remoteSyncAttempted = true;
+      if (online) {
+        setRemoteSyncing(true);
 
-  const syncSuccess = await safeSyncRemoteCatalog();
+        const [remoteCategories, firstProducts] = await Promise.all([
+          fetchRemoteCategories(),
+          safeFetchAndSyncProducts(20, 1),
+        ]);
 
-  if (syncSuccess && isMounted.current) {
-    const freshCats = await loadCategoriesLocal().catch(() => []);
-    const freshProds = await loadProductsLocal().catch(() => []);
-
-    let freshSettingsQuery =
-      await execSql(
-        'SELECT * FROM app_settings LIMIT 1;'
-      ).catch(() => null);
-
-    if (
-      !freshSettingsQuery ||
-      freshSettingsQuery.length === 0
-    ) {
-      freshSettingsQuery =
-        await execSql(
-          'SELECT * FROM local_settings LIMIT 1;'
-        ).catch(() => null);
-    }
-
-    if (isMounted.current) {
-      if (
-        freshSettingsQuery &&
-        freshSettingsQuery.length > 0
-      ) {
-        setSettings(freshSettingsQuery[0]);
-      }
-
-      setCategories(freshCats || []);
-      setProducts(
-        shuffleArray(freshProds || [])
-      );
-
-      setIsLoading(false);
-    }
-  }
-}
-
-      if (online && hasLocalData) {
-        setTimeout(async () => {
-          if (!isMounted.current) return;
-          console.log("🛰️ [BACKGROUND TASK] Starting catalog cloud synchronization pass safely...");
-
-          const syncSuccess = await safeSyncRemoteCatalog().catch((e) => {
-            console.warn("⚠️ Background cache sync transaction rejected, releasing locks:", e.message || e);
-            execSql('ROLLBACK;').catch(() => {});
-            return false;
-          });
-
-          if (syncSuccess && isMounted.current) {
-            const freshCats = await loadCategoriesLocal().catch(() => []);
-            const freshProds = await loadProductsLocal().catch(() => []);
-            let freshSettingsQuery = await execSql('SELECT * FROM app_settings LIMIT 1;').catch(() => null);
-            if (!freshSettingsQuery || freshSettingsQuery.length === 0) {
-              freshSettingsQuery = await execSql('SELECT * FROM local_settings LIMIT 1;').catch(() => null);
-            }
-
-            if (isMounted.current) {
-              if (freshSettingsQuery && freshSettingsQuery.length > 0) {
-                setSettings(freshSettingsQuery[0]);
-                console.log("✨ [LIVE MARKUP SYNC] Fresh exchange rates written atomically into home memory.");
-              }
-              setCategories(freshCats || []);
-              setProducts(shuffleArray(freshProds || []));
-            }
+        if (isMounted.current) {
+          if (remoteCategories.length > 0) {
+            setCategories(remoteCategories);
           }
-        }, 800);
+
+          if (firstProducts.length > 0) {
+            setProducts(firstProducts);
+            setProductPage(1);
+            setDisplayLimit(20);
+            setHasMoreProducts(firstProducts.length === 20);
+            setIsLoading(false);
+          }
+        }
       }
-
-      // Kick off an explicit product sync to fetch more items lazily
-    try {
-  if (online) {
-    setRemoteSyncing(true);
-
-    const synced =
-      await safeFetchAndSyncProducts(50, 1);
-
-    if (
-      synced &&
-      synced.length > 0 &&
-      isMounted.current
-    ) {
-      const freshProds =
-        await loadProductsLocal().catch(() => []);
 
       if (isMounted.current) {
-        setProducts(
-          shuffleArray(freshProds || [])
-        );
+        setRemoteSyncing(false);
       }
-    }
-  }
-} catch (e) {
-  console.warn(
-    'Background product sync error',
-    e
-  );
-} finally {
-  if (isMounted.current) {
-    setRemoteSyncing(false);
-  }
-}
 
       try {
         const adsRes = await fetch(`${API_URL}/advertisements`);
@@ -249,9 +474,7 @@ const safeFetchAndSyncProducts = useCallback(
       console.error('❌ Home Page operational collection thread failed:', err);
     } finally {
       if (isMounted.current) {
-        if (!online || hasLocalData || remoteSyncAttempted) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
         setRefreshing(false);
       }
     }
@@ -288,6 +511,16 @@ useEffect(() => {
 // INITIAL HOME LOAD — RUN ONCE
 useEffect(() => {
   handleLoadData(true);
+}, []);
+
+useEffect(() => {
+  const preloadTask = InteractionManager.runAfterInteractions(() => {
+    preloadVisualEmbeddingModel().catch((error) => {
+      console.warn('Visual search model preload failed:', error);
+    });
+  });
+
+  return () => preloadTask.cancel();
 }, []);
 
 
@@ -338,30 +571,6 @@ useEffect(() => {
       old: oldPriceCalculated
     };
   };
-
-
-const safeSyncRemoteCatalog = useCallback(async () => {
-  if (catalogSyncInProgressRef.current) {
-    console.log('⏳ Catalog sync already running, skipping duplicate sync.');
-    return false;
-  }
-
-  catalogSyncInProgressRef.current = true;
-
-  try {
-    return await syncRemoteCatalog();
-  } catch (error) {
-    console.warn(
-      '⚠️ Catalog synchronization failed:',
-      error
-    );
-
-    return false;
-  } finally {
-    catalogSyncInProgressRef.current = false;
-  }
-}, []);
-
 
     // 🎯 MULTILINGUAL LOCALE SEARCH INTERCEPTOR
   // Upgraded to filter safely across both camelCase and snake_case data layers
@@ -454,60 +663,98 @@ const renderHomeHeaderAndCategories = useCallback(() => {
     <View style={styles.headerStackArea}>
       
       {/* TOP BAR (STATIC WRAPPER) */}
-      <View style={styles.topBar}>
-        <View
-          style={[
-            styles.searchContainer,
-            isRTL && { flexDirection: 'row-reverse' },
-          ]}
-        >
-          <Ionicons
-            name="search-outline"
-            size={16}
-            color="#666"
-            style={{ opacity: 0.7 }}
-          />
+  <View
+  style={[
+    styles.searchContainer,
+    isRTL && { flexDirection: 'row-reverse' },
+  ]}
+>
+  {/* SEARCH ICON */}
+  <Ionicons
+    name="search-outline"
+    size={18}
+    color="#666"
+    style={{ opacity: 0.7 }}
+  />
 
-          <TextInput
-            ref={homeSearchInputRef}
-            placeholder={t('searchProduct') || 'SEARCH...'}
-            placeholderTextColor="#999"
-            
-           value={searchInputRefValue.current}
-           onChangeText={(text) => {
-  searchInputRefValue.current = text;
-  setSearchQuery(text);
-}}
-            // 🔥 CRITICAL STABILITY FLAGS
-            autoCorrect={false}
-            autoCapitalize="none"
-            spellCheck={false}
-            returnKeyType="search"
-            blurOnSubmit={false}
+  {/* TEXT SEARCH */}
+  <TextInput
+    ref={homeSearchInputRef}
+    placeholder={t('searchProduct') || 'SEARCH...'}
+    placeholderTextColor="#999"
 
-            // 🔥 PREVENT LAYOUT JUMP
-            style={[
-              styles.searchInput,
-              {
-                flex: 1,
-                minWidth: 0,   // IMPORTANT: prevents flex reflow jitter
-              },
-              isRTL
-                ? { textAlign: 'right', marginRight: 10 }
-                : { textAlign: 'left', marginLeft: 10 },
-            ]}
-          />
+    value={searchInputRefValue.current}
 
-          {searchQuery.length > 0 && (
-            <TouchableOpacity
-              onPress={() => setSearchQuery('')}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="close-circle" size={16} color="#888" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+    onChangeText={(text) => {
+      searchInputRefValue.current = text;
+      setSearchQuery(text);
+    }}
+
+    autoCorrect={false}
+    autoCapitalize="none"
+    spellCheck={false}
+    returnKeyType="search"
+    blurOnSubmit={false}
+
+    style={[
+      styles.searchInput,
+      {
+        flex: 1,
+        minWidth: 0,
+      },
+      isRTL
+        ? {
+            textAlign: 'right',
+            marginRight: 10,
+          }
+        : {
+            textAlign: 'left',
+            marginLeft: 10,
+          },
+    ]}
+  />
+
+   {/* CLEAR TEXT */}
+  {searchQuery.length > 0 && (
+    <TouchableOpacity
+      onPress={() => {
+        searchInputRefValue.current = '';
+        setSearchQuery('');
+      }}
+      hitSlop={{
+        top: 10,
+        bottom: 10,
+        left: 10,
+        right: 10,
+      }}
+      style={styles.searchActionButton}
+    >
+      <Ionicons
+        name="close-circle"
+        size={17}
+        color="#888"
+      />
+    </TouchableOpacity>
+  )}
+
+  <TouchableOpacity
+    onPress={handleOpenVisualSearch}
+    activeOpacity={0.7}
+    style={styles.visualSearchButton}
+    hitSlop={{
+      top: 8,
+      bottom: 8,
+      left: 8,
+      right: 8,
+    }}
+  >
+    <Ionicons
+      name="camera-outline"
+      size={22}
+      color="#111"
+    />
+  </TouchableOpacity> 
+</View>
 {renderAdvertisements()}
       {/* CATEGORIES (UNCHANGED STABLE BLOCK) */}
       {categories.length > 0 && (
@@ -626,8 +873,13 @@ const renderHomeHeaderAndCategories = useCallback(() => {
   windowSize={5}
       keyboardShouldPersistTaps="handled"
       ListHeaderComponent={renderHomeHeaderAndCategories}
-      onEndReached={() => setDisplayLimit((p) => p + 12)}
+      onEndReached={loadMoreProducts}
       onEndReachedThreshold={0.6}
+      ListFooterComponent={
+        loadingMoreProducts ? (
+          <ActivityIndicator style={{ paddingVertical: 20 }} color="#111111" />
+        ) : null
+      }
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -649,6 +901,317 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       )}
       contentContainerStyle={{ paddingBottom: 40 }}
     />
+
+  <VisualSearchLoadingOverlay
+    visible={visualSearching}
+    imageUri={visualSearchImage}
+    progress={visualSearchProgress}
+    stage={visualSearchStage}
+    locale={locale}
+  />
+
+  
+  <Modal
+  visible={visualSearchCategoryModalVisible}
+  transparent
+  animationType="fade"
+  onRequestClose={() =>
+    setVisualSearchCategoryModalVisible(false)
+  }
+>
+  <View style={styles.visualCategoryOverlay}>
+    <TouchableOpacity
+      style={styles.visualCategoryBackdrop}
+      activeOpacity={1}
+      onPress={() =>
+        setVisualSearchCategoryModalVisible(false)
+      }
+    />
+
+    <View
+      style={[
+        styles.visualCategorySheet,
+        isRTL && {
+          direction: 'rtl',
+        },
+      ]}
+    >
+      {/* HEADER */}
+      <View style={styles.visualCategoryHeader}>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.visualCategoryTitle,
+              isRTL && { textAlign: 'right' },
+            ]}
+          >
+            {locale === 'ps'
+              ? 'کټګوري وټاکئ'
+              : locale === 'fa'
+              ? 'دسته‌بندی را انتخاب کنید'
+              : 'SELECT SEARCH CATEGORY'}
+          </Text>
+
+          <Text
+            style={[
+              styles.visualCategorySubtitle,
+              isRTL && { textAlign: 'right' },
+            ]}
+          >
+            {locale === 'ps'
+              ? 'لومړی کټګوري وټاکئ، بیا د محصول عکس واخلئ یا له ګالري څخه یې انتخاب کړئ.'
+              : locale === 'fa'
+              ? 'ابتدا یک دسته‌بندی انتخاب کنید، سپس از محصول عکس بگیرید یا آن را از گالری انتخاب کنید.'
+              : 'Choose a category first, then take a photo or choose one from your gallery.'}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={() =>
+            setVisualSearchCategoryModalVisible(false)
+          }
+          style={styles.modalCloseButton}
+        >
+          <Ionicons
+            name="close"
+            size={22}
+            color="#111"
+          />
+        </TouchableOpacity>
+      </View>
+
+      {/* CATEGORY LIST */}
+      <FlatList
+        data={categories.filter(
+          (category) => !category.parentId
+        )}
+        keyExtractor={(item) => String(item.id)}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingBottom: 8,
+        }}
+        renderItem={({ item: category }) => (
+          <TouchableOpacity
+            style={[
+              styles.visualCategoryOption,
+              isRTL && {
+                flexDirection: 'row-reverse',
+              },
+            ]}
+            activeOpacity={0.8}
+            onPress={() =>
+              handleSelectVisualSearchCategory(
+                String(category.id)
+              )
+            }
+          >
+            <View style={styles.visualCategoryImageCircle}>
+              <CachedImage
+                remoteUrl={category.imageUrl}
+                style={styles.visualCategoryImage}
+              />
+            </View>
+
+            <View
+              style={[
+                styles.visualCategoryOptionText,
+                isRTL && {
+                  alignItems: 'flex-end',
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.visualCategoryOptionTitle,
+                  isRTL && {
+                    textAlign: 'right',
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {getLocalizedCategoryLabel(
+                  category
+                )}
+              </Text>
+            </View>
+
+
+          </TouchableOpacity>
+        )}
+      />
+
+      {/* CANCEL */}
+      <TouchableOpacity
+        style={styles.visualCategoryCancel}
+        activeOpacity={0.8}
+        onPress={() =>
+          setVisualSearchCategoryModalVisible(false)
+        }
+      >
+        <Text style={styles.visualCategoryCancelText}>
+          {locale === 'ps'
+            ? 'لغوه'
+            : locale === 'fa'
+            ? 'لغو'
+            : 'CANCEL'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+
+<Modal
+  visible={visualSearchModalVisible}
+  transparent
+  animationType="fade"
+  onRequestClose={() =>
+    setVisualSearchModalVisible(false)
+  }
+>
+  <View style={styles.visualSearchOverlay}>
+    <TouchableOpacity
+      style={styles.visualSearchBackdrop}
+      activeOpacity={1}
+      onPress={() =>
+        setVisualSearchModalVisible(false)
+      }
+    />
+
+    <View
+      style={[
+        styles.visualSearchSheet,
+        isRTL && {
+          direction: 'rtl',
+        },
+      ]}
+    >
+      {/* HEADER */}
+      <View style={styles.visualSearchHeader}>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[
+              styles.visualSearchTitle,
+              isRTL && { textAlign: 'right' },
+            ]}
+          >
+            {locale === 'ps'
+              ? 'د عکس له لارې لټون'
+              : locale === 'fa'
+              ? 'جستجو با تصویر'
+              : 'SEARCH BY IMAGE'}
+          </Text>
+
+          <Text
+            style={[
+              styles.visualSearchSubtitle,
+              isRTL && { textAlign: 'right' },
+            ]}
+          >
+            {locale === 'ps'
+              ? 'عکس واخلئ یا له ګالري څخه انتخاب کړئ'
+              : locale === 'fa'
+              ? 'عکس بگیرید یا از گالری انتخاب کنید'
+              : 'Find similar products using a photo'}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={() =>
+            setVisualSearchModalVisible(false)
+          }
+          style={styles.modalCloseButton}
+        >
+          <Ionicons
+            name="close"
+            size={22}
+            color="#111"
+          />
+        </TouchableOpacity>
+      </View>
+
+      {/* CAMERA */}
+      <TouchableOpacity
+        style={styles.visualSearchOption}
+        activeOpacity={0.8}
+        onPress={handleTakePhoto}
+      >
+        <View style={styles.visualSearchIconCircle}>
+          <Ionicons
+            name="camera"
+            size={25}
+            color="#111"
+          />
+        </View>
+
+        <View style={styles.visualSearchOptionText}>
+          <Text style={styles.visualSearchOptionTitle}>
+            {locale === 'ps'
+              ? 'عکس واخلئ'
+              : locale === 'fa'
+              ? 'عکس بگیرید'
+              : 'TAKE A PHOTO'}
+          </Text>
+
+          <Text style={styles.visualSearchOptionSubtitle}>
+            {locale === 'ps'
+              ? 'د کامرې په وسیله ورته محصولات ومومئ'
+              : locale === 'fa'
+              ? 'محصولات مشابه را با دوربین پیدا کنید'
+              : 'Find similar products with your camera'}
+          </Text>
+        </View>
+
+        <Ionicons
+          name={isRTL ? 'chevron-back' : 'chevron-forward'}
+          size={20}
+          color="#999"
+        />
+      </TouchableOpacity>
+
+      {/* GALLERY */}
+      <TouchableOpacity
+        style={styles.visualSearchOption}
+        activeOpacity={0.8}
+        onPress={handlePickImage}
+      >
+        <View style={styles.visualSearchIconCircle}>
+          <Ionicons
+            name="images-outline"
+            size={25}
+            color="#111"
+          />
+        </View>
+
+        <View style={styles.visualSearchOptionText}>
+          <Text style={styles.visualSearchOptionTitle}>
+            {locale === 'ps'
+              ? 'له ګالري څخه انتخاب کړئ'
+              : locale === 'fa'
+              ? 'از گالری انتخاب کنید'
+              : 'CHOOSE FROM GALLERY'}
+          </Text>
+
+          <Text style={styles.visualSearchOptionSubtitle}>
+            {locale === 'ps'
+              ? 'له موجود عکس څخه ورته محصولات ومومئ'
+              : locale === 'fa'
+              ? 'محصولات مشابه را از یک عکس موجود پیدا کنید'
+              : 'Find similar products from an existing photo'}
+          </Text>
+        </View>
+
+        <Ionicons
+          name={isRTL ? 'chevron-back' : 'chevron-forward'}
+          size={20}
+          color="#999"
+        />
+      </TouchableOpacity>
+
+    </View>
+  </View>
+</Modal>
+
+
   </View>
 );
 }
@@ -689,6 +1252,387 @@ searchContainer: {
   elevation: 3,
 },
 
+searchActionButton: {
+  justifyContent: 'center',
+  alignItems: 'center',
+  marginRight: 8,
+},
+
+visualSearchButton: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+
+  justifyContent: 'center',
+  alignItems: 'center',
+
+  backgroundColor: '#F5F5F5',
+},
+
+visualCategoryOverlay: {
+  flex: 1,
+  justifyContent: 'center',
+  padding: 20,
+  backgroundColor: 'rgba(0,0,0,0.45)',
+},
+
+
+visualCategoryBackdrop: {
+  ...StyleSheet.absoluteFillObject,
+},
+
+visualCategorySheet: {
+  backgroundColor: '#fff',
+  borderTopLeftRadius: 24,
+  borderTopRightRadius: 24,
+  paddingHorizontal: 18,
+  paddingTop: 20,
+  paddingBottom: 24,
+  maxHeight: '82%',
+},
+
+visualCategoryHeader: {
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+  marginBottom: 16,
+},
+
+visualCategoryTitle: {
+  fontSize: 18,
+  fontWeight: '800',
+  color: '#111',
+  marginBottom: 6,
+},
+
+visualCategorySubtitle: {
+  fontSize: 13,
+  lineHeight: 19,
+  color: '#777',
+  paddingRight: 8,
+},
+
+visualCategoryOption: {
+  minHeight: 68,
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: 10,
+  paddingVertical: 9,
+  marginBottom: 8,
+  borderRadius: 14,
+  backgroundColor: '#F7F7F7',
+},
+
+visualCategoryImageCircle: {
+  width: 48,
+  height: 48,
+  borderRadius: 24,
+  overflow: 'hidden',
+  backgroundColor: '#EDEDED',
+},
+
+visualCategoryImage: {
+  width: '100%',
+  height: '100%',
+},
+
+visualCategoryOptionText: {
+  flex: 1,
+  marginHorizontal: 12,
+},
+
+visualCategoryOptionTitle: {
+  fontSize: 15,
+  fontWeight: '700',
+  color: '#111',
+},
+
+visualCategoryCancel: {
+  marginTop: 8,
+  height: 48,
+  borderRadius: 14,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#F1F1F1',
+},
+
+visualCategoryCancelText: {
+  fontSize: 14,
+  fontWeight: '700',
+  color: '#555',
+},
+
+
+visualCategoryList: {
+  paddingTop: 14,
+  paddingBottom: 4,
+},
+
+visualCategoryRow: {
+  gap: 8,
+},
+
+visualCategoryOption: {
+  flex: 1,
+  minHeight: 46,
+  marginBottom: 8,
+  paddingHorizontal: 10,
+  borderRadius: 11,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#F5F5F5',
+},
+
+visualCategoryOptionText: {
+  fontSize: 11,
+  fontWeight: '800',
+  color: '#111111',
+},
+
+visualCategoryCancel: {
+  minHeight: 38,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+visualCategoryCancelText: {
+  fontSize: 12,
+  fontWeight: '800',
+  color: '#777777',
+},
+
+visualSearchOverlay: {
+  flex: 1,
+  justifyContent: 'flex-end',
+},
+
+visualSearchBackdrop: {
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor: 'rgba(0,0,0,0.45)',
+},
+
+visualSearchSheet: {
+  backgroundColor: '#FFFFFF',
+
+  borderTopLeftRadius: 28,
+  borderTopRightRadius: 28,
+
+  paddingHorizontal: 20,
+  paddingTop: 22,
+  paddingBottom: 35,
+},
+
+visualSearchHeader: {
+  flexDirection: 'row',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+
+  marginBottom: 20,
+},
+
+visualSearchTitle: {
+  fontSize: 20,
+  fontWeight: '800',
+  color: '#111',
+},
+
+visualSearchSubtitle: {
+  marginTop: 5,
+
+  fontSize: 12,
+  color: '#777',
+
+  maxWidth: 280,
+},
+
+modalCloseButton: {
+  width: 36,
+  height: 36,
+
+  borderRadius: 18,
+
+  backgroundColor: '#F4F4F4',
+
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+visualSearchOption: {
+  minHeight: 78,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+
+  paddingHorizontal: 14,
+  paddingVertical: 12,
+
+  marginBottom: 10,
+
+  borderRadius: 18,
+
+  backgroundColor: '#F8F8F8',
+},
+
+visualSearchIconCircle: {
+  width: 50,
+  height: 50,
+
+  borderRadius: 25,
+
+  backgroundColor: '#FFFFFF',
+
+  justifyContent: 'center',
+  alignItems: 'center',
+
+  marginRight: 14,
+},
+
+
+
+/* =========================
+   IMAGE SCANNER
+========================= */
+
+visualScannerFrame: {
+  width: '100%',
+  height: 240,
+  borderRadius: 18,
+  overflow: 'hidden',
+  backgroundColor: '#F4F4F4',
+  position: 'relative',
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+visualScannerImage: {
+  width: '100%',
+  height: '100%',
+},
+
+visualScannerLine: {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  height: 2,
+  backgroundColor: '#111111',
+  opacity: 0.9,
+
+  shadowColor: '#000',
+  shadowOffset: {
+    width: 0,
+    height: 0,
+  },
+  shadowOpacity: 0.35,
+  shadowRadius: 6,
+  elevation: 4,
+},
+
+/* =========================
+   SCANNER CORNERS
+========================= */
+
+scannerCorner: {
+  position: 'absolute',
+  width: 28,
+  height: 28,
+  borderColor: '#111111',
+},
+
+cornerTopLeft: {
+  top: 12,
+  left: 12,
+  borderTopWidth: 3,
+  borderLeftWidth: 3,
+  borderTopLeftRadius: 5,
+},
+
+cornerTopRight: {
+  top: 12,
+  right: 12,
+  borderTopWidth: 3,
+  borderRightWidth: 3,
+  borderTopRightRadius: 5,
+},
+
+cornerBottomLeft: {
+  bottom: 12,
+  left: 12,
+  borderBottomWidth: 3,
+  borderLeftWidth: 3,
+  borderBottomLeftRadius: 5,
+},
+
+cornerBottomRight: {
+  bottom: 12,
+  right: 12,
+  borderBottomWidth: 3,
+  borderRightWidth: 3,
+  borderBottomRightRadius: 5,
+},
+
+/* =========================
+   PROGRESS
+========================= */
+
+visualProgressContainer: {
+  width: '100%',
+  height: 6,
+  backgroundColor: '#E8E8E8',
+  borderRadius: 999,
+  overflow: 'hidden',
+  marginTop: 22,
+},
+
+visualProgressBar: {
+  height: '100%',
+  backgroundColor: '#111111',
+  borderRadius: 999,
+},
+
+visualSearchProgress: {
+  marginTop: 10,
+  fontSize: 18,
+  fontWeight: '700',
+  color: '#111111',
+  letterSpacing: 0.3,
+},
+
+
+
+visualSearchOptionText: {
+  flex: 1,
+},
+
+visualSearchOptionTitle: {
+  fontSize: 13,
+  fontWeight: '800',
+  color: '#111',
+},
+
+visualSearchOptionSubtitle: {
+  marginTop: 4,
+
+  fontSize: 11,
+  color: '#888',
+
+  lineHeight: 16,
+},
+
+visualSearchParityOption: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  marginTop: 12,
+  paddingVertical: 12,
+  borderTopWidth: 1,
+  borderTopColor: '#E5E5E5',
+},
+
+visualSearchParityText: {
+  fontSize: 11,
+  fontWeight: '700',
+  color: '#777',
+},
 searchInput: {
   flex: 1,
   marginLeft: 12,
@@ -835,6 +1779,61 @@ adTitle: {
   color: "#fff",
   fontSize: 20,
   fontWeight: "900",
+},
+
+visualSearchLoadingOverlay: {
+  ...StyleSheet.absoluteFillObject,
+
+  backgroundColor: 'rgba(250,250,250,0.92)',
+
+  justifyContent: 'center',
+  alignItems: 'center',
+
+  zIndex: 999,
+},
+
+visualSearchLoadingCard: {
+  width: '78%',
+
+  backgroundColor: '#FFF',
+
+  borderRadius: 24,
+
+  paddingVertical: 30,
+  paddingHorizontal: 24,
+
+  alignItems: 'center',
+
+  shadowColor: '#000',
+  shadowOffset: {
+    width: 0,
+    height: 8,
+  },
+  shadowOpacity: 0.1,
+  shadowRadius: 20,
+
+  elevation: 8,
+},
+
+visualSearchLoadingTitle: {
+  marginTop: 18,
+
+  fontSize: 15,
+  fontWeight: '800',
+
+  color: '#111',
+
+  textAlign: 'center',
+},
+
+visualSearchLoadingSubtitle: {
+  marginTop: 7,
+
+  fontSize: 12,
+
+  color: '#888',
+
+  textAlign: 'center',
 },
 
 adSubtitle: {

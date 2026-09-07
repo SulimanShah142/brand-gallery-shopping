@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite'; // NO /legacy
 import * as Network from 'expo-network';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
 import { API_URL } from './config';
 const DATABASE_NAME = 'ecommerce-offline.db';
@@ -9,6 +9,7 @@ const DATABASE_NAME = 'ecommerce-offline.db';
 let db: SQLite.SQLiteDatabase | null = null;
 let isInitialized = false;
 let initPromise: Promise<void> | null = null;
+let productWriteQueue: Promise<void> = Promise.resolve();
 
 // Helper to open connection
 async function getDatabase() {
@@ -342,48 +343,53 @@ export async function execSql(sql: string, params: any[] = []): Promise<any[]> {
 }
 
 export async function saveProducts(products: any[], pruneMissing = false) {
-  const database = await ensureInit();
-  await database.withTransactionAsync(async () => {
-    // Upsert products to avoid wiping local-only rows
-    for (const p of products) {
-      await database.runAsync(
-        `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          p.id,
-          p.categoryId,
-          p.name,
-          p.namePs || null,
-          p.nameFa || null,
-          p.description || null,
-          p.descriptionPs || null,
-          p.descriptionFa || null,
-          p.usdPrice?.toString() || '0',
-          p.profitPercentage ?? 20,
-          p.imageUrl || null,
-          p.availableSizes != null ? JSON.stringify(p.availableSizes) : null,
-          JSON.stringify(p.availableColors || []),
-          JSON.stringify(p.availableColorsPs || []),
-          JSON.stringify(p.availableColorsFa || []),
-          typeof p.stockQuantity === 'number' ? p.stockQuantity : 0,
-          p.isAvailable ? 1 : 0
-        ]
-      );
-    }
-
-    if (pruneMissing) {
-      const productIds = products.map((item) => item.id).filter(Boolean);
-      if (productIds.length > 0) {
-        const placeholders = productIds.map(() => '?').join(', ');
+  const write = productWriteQueue.then(async () => {
+    const database = await ensureInit();
+    await database.withTransactionAsync(async () => {
+      // Upsert products to avoid wiping local-only rows
+      for (const p of products) {
         await database.runAsync(
-          `DELETE FROM products WHERE id NOT IN (${placeholders});`,
-          productIds
+          `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            p.id,
+            p.categoryId,
+            p.name,
+            p.namePs || null,
+            p.nameFa || null,
+            p.description || null,
+            p.descriptionPs || null,
+            p.descriptionFa || null,
+            p.usdPrice?.toString() || '0',
+            p.profitPercentage ?? 20,
+            p.imageUrl || null,
+            p.availableSizes != null ? JSON.stringify(p.availableSizes) : null,
+            JSON.stringify(p.availableColors || []),
+            JSON.stringify(p.availableColorsPs || []),
+            JSON.stringify(p.availableColorsFa || []),
+            typeof p.stockQuantity === 'number' ? p.stockQuantity : 0,
+            p.isAvailable ? 1 : 0
+          ]
         );
-      } else {
-        await database.execAsync('DELETE FROM products;');
       }
-    }
+
+      if (pruneMissing) {
+        const productIds = products.map((item) => item.id).filter(Boolean);
+        if (productIds.length > 0) {
+          const placeholders = productIds.map(() => '?').join(', ');
+          await database.runAsync(
+            `DELETE FROM products WHERE id NOT IN (${placeholders});`,
+            productIds
+          );
+        } else {
+          await database.execAsync('DELETE FROM products;');
+        }
+      }
+    });
   });
+
+  productWriteQueue = write.catch(() => undefined);
+  await write;
   console.log("📦 Fresh Product Catalog saved to SQLite");
 }
 
@@ -576,37 +582,9 @@ export async function loadCategoryLocal(id: string) {
 }
 
 export async function loadProductsLocal() {
-  // Fast path: return local rows immediately if present, but kick off a background remote sync
   try {
     const local = await execSql('SELECT * FROM products;');
-    if (local && local.length > 0) {
-        // Fetch remote in background to refresh cache and prune deleted stale rows
-        (async () => {
-          try {
-            const online = await isOnline();
-            if (!online) return;
-            const remote = await fetchRemoteProducts(50, 1);
-            if (remote && remote.length > 0) await saveProducts(remote, true);
-          } catch (error) {
-            console.warn('Background product refresh failed', error);
-          }
-        })();
-
-      return local as any[];
-    }
-
-    const online = await isOnline();
-    if (online) {
-      const products = await fetchRemoteProducts(50, 1);
-      if (products && products.length > 0) {
-        await saveProducts(products);
-        return products;
-      }
-    }
-
-    console.log('📴 Loading products from local DB (full)');
-    const result = await execSql('SELECT * FROM products;');
-    return result as any[];
+    return (local || []) as any[];
   } catch (err) {
     console.error('loadProductsLocal error', err);
     return [];

@@ -42,10 +42,7 @@ const [form, setForm] = useState({
   address: '',
 });
 
-  const [coords, setCoords] = useState<[number, number]>([
-    34.5553,
-    69.2075,
-  ]);
+  const [coords, setCoords] = useState<[number, number] | null>(null);
 
   // ============================================================
   // PROMO
@@ -217,12 +214,26 @@ const totals = useMemo(() => {
   // SETTINGS
   // ============================================================
 
-  const baseDeliveryFee = Number(
-    settings?.deliveryFee ?? 150
+  const readNumberSetting = (
+    value: unknown,
+    fallback: number
+  ) => {
+    const parsed = Number(value ?? fallback);
+    return Number.isFinite(parsed)
+      ? parsed
+      : fallback;
+  };
+
+  const baseDeliveryFee = readNumberSetting(
+    settings?.deliveryFee ??
+      settings?.delivery_fee,
+    150
   );
 
-  const freeDeliveryLimit = Number(
-    settings?.freeDeliveryThreshold ?? 2000
+  const freeDeliveryLimit = readNumberSetting(
+    settings?.freeDeliveryThreshold ??
+      settings?.free_delivery_threshold,
+    2000
   );
 
   const prepayLimit = Number(
@@ -593,14 +604,22 @@ const totals = useMemo(() => {
 
 
   // ============================================================
-  // FINAL
+  // FINAL (keep the same AFN rounding on both client and server)
   // ============================================================
 
-  const final = Math.max(
+  const finalRaw = Math.max(
     0,
     merchandiseAfterDiscounts +
       shipping
   );
+
+  const roundAfnTotal = (value: number) =>
+    Math.round(
+      Math.max(0, Number(value || 0)) /
+        10
+    ) * 10;
+
+  const final = roundAfnTotal(finalRaw);
 
 
   // ============================================================
@@ -876,7 +895,7 @@ const payload = {
   ),
 
   promoDiscount: Number(
-    totals.fixedPromoDiscount ?? 0
+    totals.discount ?? 0
   ),
 
   newUserDiscount: Number(
@@ -1034,20 +1053,23 @@ items: totals.itemPricing.map(
   };
 
   const freeDeliveryThreshold = Number(
-  settings?.freeDeliveryThreshold ?? 2000
-);
+    settings?.freeDeliveryThreshold ??
+      settings?.free_delivery_threshold ??
+      2000
+  );
 
-const freeShippingProgress = Math.min(
-  100,
-  Math.round(
-    (Number(totals.subtotal || 0) /
-      Math.max(1, freeDeliveryThreshold)) *
-      100
-  )
-);
+  const freeShippingProgress = Math.min(
+    100,
+    Math.round(
+      (Number(totals.subtotal || 0) /
+        Math.max(1, freeDeliveryThreshold)) *
+        100
+    )
+  );
 
-const isFreeDelivery =
-  Number(totals.subtotal || 0) >= freeDeliveryThreshold;
+  const isFreeDelivery =
+    Number(totals.subtotal || 0) >=
+    freeDeliveryThreshold;
   // ============================================================
   // CHECKOUT MAP
   // ============================================================
@@ -1088,9 +1110,10 @@ const isFreeDelivery =
     return (
       <UnifiedMap
         role="USER"
-        destinationCoords={coords}
+        destinationCoords={coords || [34.5553, 69.2075]}
         warehouseCoords={warehouse}
         driverCoords={null}
+        showMarkers={Boolean(coords)}
         orderStatus="confirmed"
         orderId="checkout-preview"
       />
@@ -1305,7 +1328,7 @@ return (
 <TextInput 
   placeholder={
     t('whatsappNumber') ||
-    "WHATSAPP NUMBER"
+    "WHATSAPP NUMBER (OPTIONAL)"
   } 
   placeholderTextColor="#BBBBBB" 
   style={[
@@ -2254,7 +2277,7 @@ return (
       {/* PREPAYMENT                                                  */}
       {/* ========================================================== */}
 
-      {totals.requiresPrepayment && (
+      {false && totals.requiresPrepayment && (
         <View
           style={
             styles.prepaymentCard
