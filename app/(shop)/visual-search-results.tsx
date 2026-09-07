@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
   Dimensions,
+  Easing,
   FlatList,
   StyleSheet,
   Text,
@@ -42,6 +43,31 @@ export default function VisualSearchResults() {
   const { results, clearResults } = useVisualSearch();
   const [products, setProducts] = useState<ResolvedProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadingPulse = useRef(new Animated.Value(0.55)).current;
+
+  useEffect(() => {
+    if (!loading) return;
+
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(loadingPulse, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(loadingPulse, {
+          toValue: 0.55,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    pulse.start();
+    return () => pulse.stop();
+  }, [loading, loadingPulse]);
 
   useEffect(() => {
     let mounted = true;
@@ -130,6 +156,7 @@ export default function VisualSearchResults() {
 
   const renderProduct = useCallback(({ item }: { item: ResolvedProduct }) => {
     const { current, old } = getPrices(item);
+    const matchPercent = Math.max(0, Math.min(100, Math.round(Number(item.score) * 100)));
 
     return (
       <TouchableOpacity
@@ -140,9 +167,9 @@ export default function VisualSearchResults() {
         <View style={styles.imageContainer}>
           <CachedImage remoteUrl={item.imageUrl} style={styles.productImage} />
           <View style={styles.matchBadge}>
-            <Text style={styles.matchText}>
-              {`${Math.max(0, Math.min(100, Math.round(Number(item.score) * 100)))}% MATCH`}
-            </Text>
+            <Ionicons name="sparkles" size={11} color="#FFFFFF" />
+            <Text style={styles.matchText}>{`${matchPercent}%`}</Text>
+            <Text style={styles.matchLabel}>AI MATCH</Text>
           </View>
         </View>
 
@@ -163,10 +190,37 @@ export default function VisualSearchResults() {
     );
   }, [getPrices, getProductName, isRTL, router]);
 
+  const renderLoading = () => (
+    <View style={styles.loadingState}>
+      <View style={styles.analysisHeader}>
+        <Animated.View style={[styles.analysisIcon, { opacity: loadingPulse }]}>
+          <Ionicons name="sparkles" size={22} color="#FFFFFF" />
+        </Animated.View>
+        <View style={styles.analysisCopy}>
+          <Text style={styles.analysisTitle}>
+            {locale === 'ps' ? 'ستاسو عکس تحلیل کوو' : locale === 'fa' ? 'در حال تحلیل تصویر شما' : 'ANALYZING YOUR IMAGE'}
+          </Text>
+          <Text style={styles.analysisSubtitle}>
+            {locale === 'ps' ? 'د لید له مخې ورته محصولات پیدا کوو' : locale === 'fa' ? 'محصولات مشابه را بر اساس ظاهر پیدا می‌کنیم' : 'Finding products with a similar visual signature'}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.loadingGrid}>
+        {[0, 1, 2, 3].map((item) => (
+          <Animated.View key={item} style={[styles.skeletonCard, { opacity: loadingPulse }]}>
+            <View style={styles.skeletonImage} />
+            <View style={styles.skeletonLine} />
+            <View style={[styles.skeletonLine, styles.skeletonShort]} />
+          </Animated.View>
+        ))}
+      </View>
+    </View>
+  );
+
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       {loading ? (
-        <ActivityIndicator size="large" color="#111111" />
+        renderLoading()
       ) : (
         <>
           <View style={styles.emptyIconContainer}>
@@ -194,7 +248,7 @@ export default function VisualSearchResults() {
             {locale === 'ps' ? 'ورته محصولات' : locale === 'fa' ? 'محصولات مشابه' : 'SIMILAR PRODUCTS'}
           </Text>
           <Text style={[styles.subtitle, isRTL && styles.textRight]}>
-            {loading ? '...' : `${products.length} ${locale === 'ps' ? 'پایلې' : locale === 'fa' ? 'نتیجه' : 'RESULTS'}`}
+            {loading ? 'AI ANALYSIS' : `${products.length} ${locale === 'ps' ? 'پایلې' : locale === 'fa' ? 'نتیجه' : 'RESULTS'}`}
           </Text>
         </View>
       </View>
@@ -226,8 +280,9 @@ const styles = StyleSheet.create({
   productCard: { width: PRODUCT_CARD_WIDTH, marginBottom: 22, backgroundColor: '#FFFFFF', borderRadius: 22, overflow: 'hidden', elevation: 4 },
   imageContainer: { width: '100%', aspectRatio: 0.78, backgroundColor: '#F4F4F4', overflow: 'hidden' },
   productImage: { width: '100%', height: '100%' },
-  matchBadge: { position: 'absolute', left: 10, bottom: 10, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: 'rgba(17,17,17,0.82)' },
-  matchText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  matchBadge: { position: 'absolute', left: 10, right: 10, bottom: 10, minHeight: 34, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 10, backgroundColor: 'rgba(17,17,17,0.86)', flexDirection: 'row', alignItems: 'center', gap: 5 },
+  matchText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
+  matchLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
   productInfo: { padding: 14 },
   infoLeft: { alignItems: 'flex-start' },
   infoRight: { alignItems: 'flex-end' },
@@ -237,7 +292,18 @@ const styles = StyleSheet.create({
   rowReverse: { flexDirection: 'row-reverse' },
   productPrice: { fontSize: 16, fontWeight: '800', color: '#111111' },
   oldPrice: { marginLeft: 8, fontSize: 12, color: '#999999', textDecorationLine: 'line-through' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30, paddingBottom: 80 },
+  emptyContainer: { flex: 1, paddingBottom: 80 },
+  loadingState: { paddingHorizontal: 16, paddingTop: 20 },
+  analysisHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, backgroundColor: '#111111', marginBottom: 18 },
+  analysisIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#3D3D3D', alignItems: 'center', justifyContent: 'center' },
+  analysisCopy: { flex: 1, marginLeft: 12 },
+  analysisTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '900', letterSpacing: 0.5 },
+  analysisSubtitle: { color: 'rgba(255,255,255,0.62)', fontSize: 11, marginTop: 4 },
+  loadingGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  skeletonCard: { width: PRODUCT_CARD_WIDTH, marginBottom: 18, paddingBottom: 12, borderRadius: 18, backgroundColor: '#FFFFFF', overflow: 'hidden' },
+  skeletonImage: { width: '100%', aspectRatio: 0.78, backgroundColor: '#E8E8E8' },
+  skeletonLine: { height: 10, width: '72%', borderRadius: 5, backgroundColor: '#E2E2E2', marginTop: 12, marginHorizontal: 12 },
+  skeletonShort: { width: '42%', marginTop: 8 },
   emptyIconContainer: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 3 },
   emptyTitle: { marginTop: 18, fontSize: 15, fontWeight: '800', color: '#222222', textAlign: 'center' },
   emptySubtitle: { marginTop: 7, fontSize: 12, color: '#888888', textAlign: 'center' },
