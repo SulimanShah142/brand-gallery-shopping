@@ -6,16 +6,12 @@ import {
   Text,
   StyleSheet,
 } from "react-native";
+import { Linking } from "react-native";
 import { useRouter, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { API_URL } from "@/lib/config";
-import { OneSignal } from "react-native-onesignal";
 import { authClient } from "@/lib/auth-client";
-
-const SHOPPER_USER_APP_ID =
-  "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d";
-
-let oneSignalInitialized = false;
+import { initOneSignal } from '@/lib/notiifcations';
 
 export default function Boot() {
   const router = useRouter();
@@ -45,21 +41,25 @@ export default function Boot() {
     mountedRef.current = true;
 
     const bootstrap = async () => {
-      try {
-        // Wrap OneSignal init to catch any unexpected errors
-        try {
-          if (!oneSignalInitialized) {
-            oneSignalInitialized = true;
+      let hasProductDeepLink = false;
 
-            OneSignal.initialize(SHOPPER_USER_APP_ID);
-            // Do not await permission request here to avoid blocking startup
-            OneSignal.Notifications.requestPermission(true).catch((err) => {
-              console.log('OneSignal permission request failed:', err);
-            });
-          }
-        } catch (err) {
+      try {
+        const initialUrl = await Linking.getInitialURL().catch(() => null);
+        hasProductDeepLink = Boolean(
+          initialUrl && /\/products?\/[^/?#\s]+/i.test(initialUrl)
+        );
+
+        console.log(
+          "Boot initial URL:",
+          initialUrl,
+          "hasProductDeepLink:",
+          hasProductDeepLink
+        );
+
+        // Wrap OneSignal init to catch any unexpected errors
+        await initOneSignal(null).catch((err) => {
           console.log('OneSignal initialization safe-catch:', err);
-        }
+        });
 
         // Initialize auth client safely
         try {
@@ -107,7 +107,7 @@ export default function Boot() {
             console.log("👤 Launching in Guest Mode");
           }
 
-          if (segments[0] == null) {
+          if (segments[0] == null && !hasProductDeepLink) {
             safeReplace("/(shop)");
           }
           return;
@@ -125,6 +125,10 @@ export default function Boot() {
           authClient.setSessionData({
             token,
             user: cachedUser,
+          });
+
+          await initOneSignal(cachedUser?.id || null).catch((error) => {
+            console.log('OneSignal authenticated restore failed:', error);
           });
         } catch (err) {
           console.log(
@@ -151,7 +155,7 @@ export default function Boot() {
         // overriding the initial deep link handling.
         // ================================================
 
-        if (segments[0] == null) {
+        if (segments[0] == null && !hasProductDeepLink) {
           safeReplace("/(shop)");
         }
 
@@ -232,7 +236,7 @@ export default function Boot() {
               user: JSON.parse(cachedUser),
             });
 
-              if (segments[0] == null) {
+              if (segments[0] == null && !hasProductDeepLink) {
                 safeReplace("/(shop)");
               }
             return;

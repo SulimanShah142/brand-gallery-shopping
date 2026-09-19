@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -30,9 +30,10 @@ import { useVisualSearch } from "@/Contexts/VisualSearchContext";
 import { generateVisualEmbedding } from "@/lib/visualEmbedding";
 import { searchProductsByEmbedding } from "@/lib/visualSearch";
 import VisualSearchLoadingOverlay from "@/components/VisualSearchLoadingOverlay";
+import SkeletonGrid from "@/components/SkeletonGrid";
 
 const { width } = Dimensions.get("window");
-const HERO_IMAGE_HEIGHT = Math.round(width * 1.25);
+const HERO_IMAGE_HEIGHT = width;
 
 
 export default function UserProductDetails() {
@@ -51,7 +52,12 @@ const { id } = useLocalSearchParams<{ id: string }>();
   const [settings, setSettings] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [similarProducts, setSimilarProducts] = useState<any[]>([]);
+  const [similarPage, setSimilarPage] = useState(1);
+  const [loadingMoreSimilar, setLoadingMoreSimilar] = useState(false);
+  const [hasMoreSimilar, setHasMoreSimilar] = useState(true);
+  const similarRequestInFlight = useRef(false);
   const [descModalVisible, setDescModalVisible] = useState(false);
+  const [usageModalVisible, setUsageModalVisible] = useState(false);
 
   const [loading, setLoading] = useState(true);
   // Interaction States
@@ -431,8 +437,8 @@ useEffect(() => {
           : Promise.resolve(null),
 
         needsSimilar
-          ? fetch(
-              `${API_URL}/api/products?limit=12`
+            ? fetch(
+              `${API_URL}/api/products?limit=20&page=1`
             )
           : Promise.resolve(null),
       ]);
@@ -727,14 +733,14 @@ useEffect(() => {
         reviews:
           reviewsData,
 
-        similarProducts:
+          similarProducts:
           similarData
             .filter(
               (p: any) =>
                 String(p?.id) !==
                 String(id)
             )
-            .slice(0, 10),
+            .slice(0, 20),
 
         // Settings
         settings:
@@ -762,6 +768,8 @@ useEffect(() => {
         setSimilarProducts(
           completeProduct.similarProducts
         );
+        setSimilarPage(1);
+        setHasMoreSimilar(similarData.length >= 20);
       }
 
 
@@ -901,6 +909,40 @@ useEffect(() => {
   };
 
 }, [id]);
+
+const loadMoreSimilarProducts = useCallback(async () => {
+  if (similarRequestInFlight.current || loadingMoreSimilar || !hasMoreSimilar || !id) return;
+
+  similarRequestInFlight.current = true;
+  setLoadingMoreSimilar(true);
+  const nextPage = similarPage + 1;
+
+  try {
+    const response = await fetch(`${API_URL}/api/products?limit=20&page=${nextPage}`);
+    if (!response.ok) return;
+
+    const nextProducts = await response.json();
+    const nextItems = Array.isArray(nextProducts) ? nextProducts : [];
+    const existingIds = new Set(similarProducts.map((item: any) => String(item.id)));
+    const uniqueItems = nextItems.filter((item: any) =>
+      String(item.id) !== String(id) && !existingIds.has(String(item.id))
+    );
+
+    setSimilarProducts((current) => [...current, ...uniqueItems]);
+    setSimilarPage(nextPage);
+    setHasMoreSimilar(nextItems.length >= 20);
+  } finally {
+    similarRequestInFlight.current = false;
+    setLoadingMoreSimilar(false);
+  }
+}, [hasMoreSimilar, id, loadingMoreSimilar, similarPage, similarProducts]);
+
+const handleProductScroll = useCallback((event: any) => {
+  const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+  if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 500) {
+    loadMoreSimilarProducts();
+  }
+}, [loadMoreSimilarProducts]);
 
 const handleColorChange = (
   color: string
@@ -1298,6 +1340,7 @@ const getLocalizedColorName = (
     const optimizedProductPayload = {
       ...product,
       price: finalDisplayPrice,
+      cartImageUrl: productImages[0] || product.imageUrl,
     };
 
     dispatchAddToCart(optimizedProductPayload, 1, selectedSize, selectedColor);
@@ -1702,7 +1745,16 @@ const productImages = useMemo(() => {
           showsVerticalScrollIndicator={false}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContentContainer}
+          onScroll={handleProductScroll}
+          scrollEventThrottle={250}
         >
+          <TouchableOpacity
+            onPress={() => router.replace('/')}
+            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 }}
+          >
+            <Ionicons name="arrow-back" size={20} color="#111111" />
+            <Text style={{ marginLeft: 6, fontWeight: '700' }}>{t('back') || 'BACK'}</Text>
+          </TouchableOpacity>
           {/* IMAGE HERO SECTION */}
         {/* ============================================================
     PRODUCT IMAGE GALLERY
@@ -1792,7 +1844,7 @@ const productImages = useMemo(() => {
                 width: "100%",
                 height: "100%",
               }}
-              resizeMode="cover"
+              resizeMode="contain"
             />
           </TouchableOpacity>
         )
@@ -2057,6 +2109,20 @@ const productImages = useMemo(() => {
                 </Text>
               </TouchableOpacity>
             )}
+
+            {(product?.usageInstructions ||
+              product?.usageInstructionsPs ||
+              product?.usageInstructionsFa) && (
+              <TouchableOpacity
+                onPress={() => setUsageModalVisible(true)}
+                style={[styles.usageInstructionsButton, isRTL && { flexDirection: 'row-reverse' }]}
+              >
+                <Ionicons name="information-circle-outline" size={18} color="#111111" />
+                <Text style={[styles.showMoreText, isRTL && { textAlign: 'right' }]}>
+                  {t('viewUsageInstructions') || 'View usage instructions'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
           {/* =========================
     SHIPPING INFRASTRUCTURE CARD
@@ -2166,7 +2232,7 @@ const productImages = useMemo(() => {
             </View>
 
             <View style={[styles.recommendationGrid]}>
-              {similarProducts.slice(0, 10).map((item: any) => {
+              {similarProducts.map((item: any) => {
                 const itemUsd = parseFloat(item.usdPrice || "0");
                 const appRate = parseFloat(settings?.usdToAfnRate || "65");
                 const appMargin = parseFloat(
@@ -2237,6 +2303,12 @@ const productImages = useMemo(() => {
                 );
               })}
             </View>
+            {loadingMoreSimilar && (
+              <View style={styles.similarLoadingFooter}>
+                <SkeletonGrid count={4} />
+                <ActivityIndicator style={{ marginVertical: 8 }} color="#111111" />
+              </View>
+            )}
           </View>
         </ScrollView>
 
@@ -2437,11 +2509,11 @@ const productImages = useMemo(() => {
                * from the rows.
                */
 
-              const measurementKeys =
+              const measurementKeys: string[] =
                 Array.from(
-                  new Set(
+                  new Set<string>(
                     rows.flatMap(
-                      (row: any) =>
+                      (row: any): string[] =>
                         row?.measurements &&
                         typeof row.measurements ===
                           "object"
@@ -3097,11 +3169,11 @@ const productImages = useMemo(() => {
                  * Nothing is hard-coded here.
                  */
 
-                const measurementKeys =
+                const measurementKeys: string[] =
                   Array.from(
-                    new Set(
+                    new Set<string>(
                       rows.flatMap(
-                        (row: any) =>
+                        (row: any): string[] =>
                           row?.measurements &&
                           typeof row.measurements ===
                             "object"
@@ -3466,6 +3538,56 @@ const productImages = useMemo(() => {
   </View>
 </Modal>
 
+<Modal
+  visible={usageModalVisible}
+  animationType="slide"
+  transparent
+  onRequestClose={() => setUsageModalVisible(false)}
+>
+  <View style={styles.productDetailsOverlay}>
+    <View style={styles.productDetailsSheet}>
+      <View style={styles.productDetailsHeader}>
+        <Text style={[styles.productDetailsTitle, isRTL && { textAlign: 'right' }]}>
+          {(t('usageInstructions') || 'USAGE INSTRUCTIONS').toUpperCase()}
+        </Text>
+        <TouchableOpacity
+          onPress={() => setUsageModalVisible(false)}
+          style={styles.productDetailsClose}
+          accessibilityLabel={t('close') || 'Close'}
+        >
+          <Ionicons name="close" size={22} color="#111111" />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.productDetailsHandle} />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.productDetailsContent}
+      >
+        <View style={styles.detailsSection}>
+          <Text style={[styles.detailsDescription, isRTL && { textAlign: 'right' }]}>
+            {(locale === 'ps'
+              ? product.usageInstructionsPs || product.usageInstructions
+              : locale === 'fa'
+                ? product.usageInstructionsFa || product.usageInstructions
+                : product.usageInstructions) ||
+              t('noUsageInstructions') ||
+              'No usage instructions provided.'}
+          </Text>
+        </View>
+      </ScrollView>
+      <View style={styles.productDetailsBottom}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.modalCloseBtn}
+          onPress={() => setUsageModalVisible(false)}
+        >
+          <Text style={styles.modalCloseText}>{(t('close') || 'CLOSE').toUpperCase()}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+</Modal>
+
 {imageViewerVisible && (
   <Modal
     visible={imageViewerVisible}
@@ -3638,6 +3760,12 @@ const productImages = useMemo(() => {
 }
 
 const styles = StyleSheet.create({
+  similarLoadingFooter: {
+    minHeight: 260,
+  },
+  colorSelectorWrapper: {
+    marginTop: 8,
+  },
   heroContainer: {
     width: "100%",
     height: 420,
@@ -3755,6 +3883,13 @@ productDetailsContent: {
   paddingHorizontal: 18,
   paddingTop: 8,
   paddingBottom: 24,
+},
+
+usageInstructionsButton: {
+  marginTop: 14,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 7,
 },
 
 detailsSection: {

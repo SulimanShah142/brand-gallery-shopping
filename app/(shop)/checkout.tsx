@@ -41,6 +41,47 @@ const [form, setForm] = useState({
   whatsapp: '',
   address: '',
 });
+  const [countryCode, setCountryCode] = useState('+93');
+  const [countryPickerTarget, setCountryPickerTarget] = useState<'phone' | 'whatsapp' | null>(null);
+  const countryCodes = [
+    { code: '+93', label: 'Afghanistan' },
+    { code: '+92', label: 'Pakistan' },
+    { code: '+98', label: 'Iran' },
+    { code: '+91', label: 'India' },
+    { code: '+971', label: 'United Arab Emirates' },
+    { code: '+966', label: 'Saudi Arabia' },
+    { code: '+90', label: 'Turkey' },
+    { code: '+1', label: 'United States / Canada' },
+    { code: '+44', label: 'United Kingdom' },
+  ];
+
+  const getLocalNumber = (value: string) => {
+    if (!value.startsWith('+')) return value;
+
+    const matchingCountry = [...countryCodes]
+      .sort((left, right) => right.code.length - left.code.length)
+      .find((country) => value.startsWith(country.code));
+
+    return matchingCountry
+      ? value.slice(matchingCountry.code.length)
+      : value;
+  };
+
+  const updateContactNumber = (field: 'phone' | 'whatsapp', value: string) => {
+    const digits = value.replace(/\D/g, '');
+    setForm((current) => ({ ...current, [field]: digits ? `${countryCode}${digits}` : '' }));
+  };
+
+  const selectCountryCode = (code: string) => {
+    setCountryCode(code);
+    if (countryPickerTarget) {
+      setForm((current) => {
+        const local = getLocalNumber(current[countryPickerTarget]);
+        return { ...current, [countryPickerTarget]: local ? `${code}${local}` : '' };
+      });
+    }
+    setCountryPickerTarget(null);
+  };
 
   const [coords, setCoords] = useState<[number, number] | null>(null);
 
@@ -808,6 +849,21 @@ const totals = useMemo(() => {
   return;
 }
 
+    const phoneDigits = form.phone.replace(/\D/g, '');
+    const whatsappDigits = form.whatsapp.replace(/\D/g, '');
+    const isValidInternationalNumber = (value: string) =>
+      /^\+?[1-9]\d{7,14}$/.test(value.replace(/[\s()-]/g, ''));
+
+    if (!isValidInternationalNumber(form.phone) || phoneDigits.length < 8 || phoneDigits.length > 15) {
+      Alert.alert(t('invalidPhone') || 'Invalid phone number', 'Enter a valid international phone number with country code.');
+      return;
+    }
+
+    if (form.whatsapp.trim() && (!isValidInternationalNumber(form.whatsapp) || whatsappDigits.length < 8 || whatsappDigits.length > 15)) {
+      Alert.alert(t('invalidWhatsapp') || 'Invalid WhatsApp number', 'Enter a valid international WhatsApp number with country code.');
+      return;
+    }
+
     // ----------------------------------------------------------
     // CART VALIDATION
     // ----------------------------------------------------------
@@ -1307,43 +1363,44 @@ return (
 />
 
 {/* PHONE */}
-<TextInput 
-  placeholder={t('phoneNumber') || "PHONE NUMBER"} 
-  placeholderTextColor="#BBBBBB" 
-  style={[
-    styles.input,
-    isRTL && { textAlign: 'right' }
-  ]} 
-  keyboardType="phone-pad"
-  value={form.phone} 
-  onChangeText={(v) =>
-    setForm({
-      ...form,
-      phone: v,
-    })
-  } 
-/>
+<View style={[styles.phoneField, isRTL && { flexDirection: 'row-reverse' }]}>
+  <TouchableOpacity
+    style={styles.countryCodeButton}
+    onPress={() => setCountryPickerTarget('phone')}
+    activeOpacity={0.8}
+  >
+    <Text style={styles.countryCodeText}>{countryCode}</Text>
+    <Ionicons name="chevron-down" size={14} color="#555555" />
+  </TouchableOpacity>
+  <TextInput
+    placeholder={t('phoneNumber') || 'PHONE NUMBER'}
+    placeholderTextColor="#BBBBBB"
+    style={[styles.phoneInput, isRTL && { textAlign: 'right' }]}
+    keyboardType="phone-pad"
+    value={getLocalNumber(form.phone)}
+    onChangeText={(v) => updateContactNumber('phone', v)}
+  />
+</View>
 
 {/* WHATSAPP */}
-<TextInput 
-  placeholder={
-    t('whatsappNumber') ||
-    "WHATSAPP NUMBER (OPTIONAL)"
-  } 
-  placeholderTextColor="#BBBBBB" 
-  style={[
-    styles.input,
-    isRTL && { textAlign: 'right' }
-  ]} 
-  keyboardType="phone-pad"
-  value={form.whatsapp} 
-  onChangeText={(v) =>
-    setForm({
-      ...form,
-      whatsapp: v,
-    })
-  } 
-/>
+<View style={[styles.phoneField, isRTL && { flexDirection: 'row-reverse' }]}>
+  <TouchableOpacity
+    style={styles.countryCodeButton}
+    onPress={() => setCountryPickerTarget('whatsapp')}
+    activeOpacity={0.8}
+  >
+    <Text style={styles.countryCodeText}>{countryCode}</Text>
+    <Ionicons name="chevron-down" size={14} color="#555555" />
+  </TouchableOpacity>
+  <TextInput
+    placeholder={t('whatsappNumber') || 'WHATSAPP NUMBER (OPTIONAL)'}
+    placeholderTextColor="#BBBBBB"
+    style={[styles.phoneInput, isRTL && { textAlign: 'right' }]}
+    keyboardType="phone-pad"
+    value={getLocalNumber(form.whatsapp)}
+    onChangeText={(v) => updateContactNumber('whatsapp', v)}
+  />
+</View>
 
 {/* ADDRESS */}
 <TextInput 
@@ -1435,7 +1492,16 @@ return (
 
   return (
     <View key={`checkout-slat-${item.id}-${idx}`} style={[styles.manifestItemRowLine, isRTL && { flexDirection: 'row-reverse' }]}>
-      <Image source={{ uri: item.imageUrl || productRef.imageUrl }} style={styles.manifestItemImageThumb} resizeMode="cover" />
+      <Image
+        source={{
+          uri: (() => {
+            const colorImages = productRef?.colorImageUrls?.[item.selectedColor] || productRef?.colorImages?.[item.selectedColor];
+            return (Array.isArray(colorImages) ? colorImages[0] : colorImages) || item.imageUrl || productRef.imageUrl;
+          })(),
+        }}
+        style={styles.manifestItemImageThumb}
+        resizeMode="contain"
+      />
       
       <View style={[styles.manifestItemDetailsCell, isRTL ? { alignItems: 'flex-end', paddingRight: 12 } : { alignItems: 'flex-start', paddingLeft: 12 }]}>
         <Text style={[styles.manifestItemNameText, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]} numberOfLines={1}>
@@ -2587,6 +2653,43 @@ return (
 
           </View>
         </ScrollView>
+
+        <Modal
+          visible={countryPickerTarget !== null}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setCountryPickerTarget(null)}
+        >
+          <View style={styles.countryModalOverlay}>
+            <TouchableOpacity
+              style={styles.countryModalBackdrop}
+              activeOpacity={1}
+              onPress={() => setCountryPickerTarget(null)}
+            />
+            <View style={styles.countryModalCard}>
+              <Text style={[styles.countryModalTitle, isRTL && { textAlign: 'right' }]}>
+                {(t('selectCountryCode') || 'SELECT COUNTRY CODE').toUpperCase()}
+              </Text>
+              <ScrollView
+                style={styles.countryOptionsScroll}
+                showsVerticalScrollIndicator
+                keyboardShouldPersistTaps="handled"
+              >
+                {countryCodes.map((country) => (
+                  <TouchableOpacity
+                    key={country.code}
+                    style={[styles.countryOption, isRTL && { flexDirection: 'row-reverse' }]}
+                    onPress={() => selectCountryCode(country.code)}
+                  >
+                    <Text style={styles.countryOptionCode}>{country.code}</Text>
+                    <Text style={[styles.countryOptionLabel, isRTL && { textAlign: 'right' }]}>{country.label}</Text>
+                    {country.code === countryCode && <Ionicons name="checkmark" size={18} color="#111111" />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
         
            <View style={styles.stickyFooter}>
             <TouchableOpacity 
@@ -3449,6 +3552,18 @@ sectionLabel: {
  gpsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   gpsBtnText: { fontSize: 9, fontWeight: '700', color: '#000000', letterSpacing: 1 },
   input: { height: 44, borderBottomWidth: 1, borderBottomColor: '#EAEAEA', paddingVertical: 10, marginBottom: 16, fontSize: 13, color: '#000000', letterSpacing: 0.4 },
+  phoneField: { height: 48, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#EAEAEA', marginBottom: 16 },
+  countryCodeButton: { minWidth: 76, height: 36, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRightWidth: 1, borderRightColor: '#E5E5E5' },
+  countryCodeText: { fontSize: 13, fontWeight: '800', color: '#111111' },
+  phoneInput: { flex: 1, height: 48, paddingHorizontal: 12, fontSize: 13, color: '#000000' },
+  countryModalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
+  countryModalBackdrop: { ...StyleSheet.absoluteFillObject },
+  countryModalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 28 },
+  countryModalTitle: { fontSize: 12, fontWeight: '900', letterSpacing: 1.5, color: '#111111', marginBottom: 12 },
+  countryOptionsScroll: { maxHeight: 420 },
+  countryOption: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F1F1', gap: 12 },
+  countryOptionCode: { width: 52, fontSize: 14, fontWeight: '800', color: '#111111' },
+  countryOptionLabel: { flex: 1, fontSize: 13, color: '#555555' },
   billVal: { fontSize: 12, color: '#000000', fontWeight: '600', letterSpacing: 0.3 },
   
   // 🎯 THE PERFECTED STICKY FOOTER: Sits perfectly flush against the hardware safe space

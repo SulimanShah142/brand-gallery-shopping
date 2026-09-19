@@ -225,7 +225,7 @@ const getStoredToken = useCallback(async () => {
   return token ? String(token).trim() : null;
 }, [session?.session?.token]);
 
-const getAuthHeaders = useCallback(async () => {
+const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
   const token = await getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }, [getStoredToken]);
@@ -271,7 +271,7 @@ const fetchOrders = useCallback(async () => {
   } finally {
     setLoading(false);
   }
-}, [session?.user?.id, authHeaders]);
+}, [getUserId, getAuthHeaders]);
   // 1. LOCAL NUMERIC TRANSLATION METHOD (SAFE AND REMAPPED)
   const toLocalNumbers = useCallback((num: string | number) => {
     const stringValue = String(num || '0').replace(/,/g, '');
@@ -321,9 +321,11 @@ const getEditedQuantity = (item: any) => {
   return quantityEdits[item.id] ?? (Number(item.quantity) || 1);
 };
 
-const authHeaders = useMemo(() => {
+const authHeaders = useMemo<Record<string, string>>(() => {
   const token = session?.session?.token;
-  return token ? { Authorization: `Bearer ${token.trim()}` } : {};
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token.trim()}`;
+  return headers;
 }, [session?.session?.token]);
 
 const hasQuantityChanges = useMemo(() => {
@@ -587,7 +589,7 @@ const adjustItemQuantity = async (itemId: string, newQty: number) => {
 
   // 3. AUTOMATED TELEMETRY HEARTBEAT POLLING LOOP
   useEffect(() => {
-    let trackingIntervalId: NodeJS.Timeout;
+    let trackingIntervalId: ReturnType<typeof setInterval> | undefined;
 const currentStatus =
   normalizeStatus(order?.status);
 
@@ -652,6 +654,26 @@ const isOrderActivelyInTransit =
     const lng = parseFloat(String(settings?.warehouseLng || settings?.warehouse_lng || '').replace(/,/g, ''));
     return (!isNaN(lat) && !isNaN(lng)) ? [lat, lng] : [34.5330, 69.1660]; 
   }, [settings]);
+
+  const hasCustomerLocation = Boolean(order?.latitude && order?.longitude);
+  const estimatedArrival = useMemo(() => {
+    const start = new Date(order?.createdAt || Date.now());
+    const from = new Date(start);
+    const to = new Date(start);
+    from.setDate(from.getDate() + 14);
+    to.setDate(to.getDate() + 21);
+    return `${from.toLocaleDateString()} - ${to.toLocaleDateString()}`;
+  }, [order?.createdAt]);
+
+  const statusDates = useMemo(() => {
+    const history = Array.isArray(order?.statusHistory)
+      ? order.statusHistory
+      : Array.isArray(order?.statusEvents) ? order.statusEvents : [];
+    return new Map(history.map((event: any) => [
+      normalizeStatus(event.status || event.toStatus),
+      event.changedAt || event.createdAt || event.updatedAt,
+    ]));
+  }, [order?.statusHistory, order?.statusEvents]);
 
   // 5. MEMOIZED MAP RENDER SLOT
   const MemoizedMapComponent = useMemo(() => {
@@ -767,9 +789,45 @@ const visibleItems = itemsExpanded
         /* ================= NORMAL ORDER DETAILS PAGE ================= */
         <View style={styles.container}>
 
+          <View style={[styles.orderPageHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.orderBackButton}
+              accessibilityLabel={t('back') || 'Back'}
+            >
+              <Ionicons name={isRTL ? 'arrow-forward' : 'arrow-back'} size={20} color="#111111" />
+            </TouchableOpacity>
+            <View style={[styles.orderHeaderCopy, isRTL && { alignItems: 'flex-end' }]}>
+              <Text style={[styles.orderHeaderTitle, isRTL && { textAlign: 'right' }]}>
+                {(t('orderDetails') || 'ORDER DETAILS').toUpperCase()}
+              </Text>
+              <Text style={[styles.orderHeaderMeta, isRTL && { textAlign: 'right' }]}>
+                #{String(order.id || '').slice(0, 8).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.orderHeaderStatusDot} />
+          </View>
+
           {/* MAP HEADER HOST AREA */}
-          <View style={styles.mapCollapsedHost}>
-            {MemoizedMapComponent}
+          {hasCustomerLocation ? (
+            <View style={styles.mapCollapsedHost}>{MemoizedMapComponent}</View>
+          ) : null}
+
+          <View style={styles.deliveryInfoCard}>
+            <View style={[styles.deliveryInfoHeader, isRTL && { flexDirection: 'row-reverse' }]}>
+              <Ionicons name="cube-outline" size={20} color="#111111" />
+              <Text style={[styles.sectionLabel, isRTL && { textAlign: 'right' }]}>{(t('deliveryDetails') || 'DELIVERY DETAILS').toUpperCase()}</Text>
+            </View>
+            <View style={[styles.orderStatusPill, { backgroundColor: statusConfig.bg }, isRTL && { alignSelf: 'flex-end' }]}>
+              <View style={[styles.orderStatusPillDot, { backgroundColor: statusConfig.color }]} />
+              <Text style={[styles.orderStatusPillText, { color: statusConfig.color }]}>
+                {(t(`status_${statusConfig.label}`) || t(statusConfig.label) || statusConfig.label.replace(/_/g, ' ')).toUpperCase()}
+              </Text>
+            </View>
+            <Text style={styles.deliveryInfoText}>{t('shipsFromWarehouse') || 'Ships from our warehouse'}</Text>
+            <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryAddress') || 'Delivery address'}: {order.address || '-'}</Text>
+            <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('estimatedArrival') || 'Estimated arrival'}: {estimatedArrival}</Text>
+            <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryWindow') || 'Delivery usually takes 14 to 21 days.'}</Text>
           </View>
 
           {/* DETAILS SHEET */}
@@ -875,7 +933,7 @@ const visibleItems = itemsExpanded
         },
       ]}
     >
-      {ORDER_TIMELINE_STAGES.map((stage, index) => {
+              {ORDER_TIMELINE_STAGES.map((stage, index) => {
         const isCompleted =
           index < safeTimelineIndex;
 
@@ -895,6 +953,12 @@ const visibleItems = itemsExpanded
               },
             ]}
           >
+            <Text style={styles.orderTimelineDate}>
+              {statusDates.get(stage.key)
+                ? new Date(statusDates.get(stage.key) as string).toLocaleDateString()
+                : index === safeTimelineIndex && order?.updatedAt ? new Date(order.updatedAt).toLocaleDateString() : ''}
+            </Text>
+
             {/* ================================================= */}
             {/* STAGE NAME — ABOVE THE TRACKING LINE             */}
             {/* ================================================= */}
@@ -1112,7 +1176,7 @@ const visibleItems = itemsExpanded
           t('confirmCancelPrompt') || 'Are you sure you want to cancel this order?',
           [
             { text: t('no') || 'No', style: 'cancel' },
-            { text: t('yes') || 'Yes', onPress: () => submitCancelOrder(orderId) },
+            { text: t('yes') || 'Yes', onPress: () => orderId && submitCancelOrder(orderId) },
           ]
         );
       }}
@@ -1130,9 +1194,52 @@ const visibleItems = itemsExpanded
 
 {isRefundRequested && (
   <Text style={styles.pendingText}>
-    ⏳ Refund request pending review
+    {t('refundPending') || 'Refund request pending review'}
   </Text>
 )}
+            <View style={styles.section}>
+              <View style={[styles.sectionHeadingRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                <Text style={[styles.sectionLabel, isRTL && { textAlign: 'right' }]}>
+                  {(t('items') || 'ITEMS').toUpperCase()}
+                </Text>
+                <Text style={styles.sectionCount}>{toLocalNumbers(order.items?.length || 0)}</Text>
+              </View>
+              {(visibleItems as any[]).map((item: any, index: number) => {
+                const itemName = locale === 'ps'
+                  ? item.product?.namePs || item.namePs || item.product?.name || item.name
+                  : locale === 'fa'
+                    ? item.product?.nameFa || item.nameFa || item.product?.name || item.name
+                    : item.product?.name || item.name;
+                const itemPrice = Number(item.price || item.unitPrice || 0);
+                const itemQuantity = getEditedQuantity(item);
+                const imageUrl = item.product?.imageUrl || item.imageUrl;
+
+                return (
+                  <View key={item.id || `${item.productId || index}`} style={[styles.orderItemRow, isRTL && { flexDirection: 'row-reverse' }]}>
+                    {imageUrl ? (
+                      <Image source={{ uri: imageUrl }} style={styles.orderItemImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.orderItemImagePlaceholder}><Ionicons name="image-outline" size={20} color="#A1A1AA" /></View>
+                    )}
+                    <View style={[styles.orderItemCopy, isRTL && { alignItems: 'flex-end' }]}>
+                      <Text style={[styles.itemName, isRTL && { textAlign: 'right' }]} numberOfLines={2}>{itemName || t('unknownProduct') || 'Unknown product'}</Text>
+                      <Text style={[styles.itemMeta, isRTL && { textAlign: 'right' }]}>
+                        {t('qty') || 'Qty'}: {toLocalNumbers(itemQuantity)}
+                        {item.selectedSize ? `  ${t('size') || 'Size'}: ${item.selectedSize}` : ''}
+                        {item.selectedColor ? `  ${t('color') || 'Color'}: ${item.selectedColor}` : ''}
+                      </Text>
+                      <Text style={styles.priceText}>{isRTL ? `${toLocalNumbers(itemPrice * itemQuantity)} افغانۍ` : `AFN ${toLocalNumbers((itemPrice * itemQuantity).toLocaleString('en-US'))}`}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+              {Array.isArray(order.items) && order.items.length > 3 && (
+                <TouchableOpacity onPress={() => setItemsExpanded((expanded) => !expanded)} style={styles.itemsToggle}>
+                  <Text style={styles.itemsToggleText}>{t(itemsExpanded ? 'showLess' : 'showMore') || (itemsExpanded ? 'SHOW LESS' : 'SHOW MORE')}</Text>
+                  <Ionicons name={itemsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color="#111111" />
+                </TouchableOpacity>
+              )}
+            </View>
             {/* ========================================================================= */}
             {/* FINANCIAL SUMMARY RECAP BILLING PANEL (HYPER-SAFE CASTER CURE)            */}
             {/* ========================================================================= */}
@@ -1274,6 +1381,51 @@ export const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', // High-end solid white runway contrast
   },
 
+  orderPageHeader: {
+    minHeight: 74,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F1F1',
+  },
+
+  orderBackButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F7F7F7',
+  },
+
+  orderHeaderCopy: {
+    flex: 1,
+    marginLeft: 12,
+  },
+
+  orderHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    color: '#111111',
+  },
+
+  orderHeaderMeta: {
+    marginTop: 4,
+    fontSize: 11,
+    color: '#888888',
+    letterSpacing: 0.5,
+  },
+
+  orderHeaderStatusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#111111',
+  },
+
   // =========================
   // MAP SECTION (FLOATING GEOMETRIC ANCHOR)
   // =========================
@@ -1287,6 +1439,107 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
     borderBottomWidth: 1,
     borderColor: '#F2F2F2',
+  },
+
+  deliveryInfoCard: {
+    margin: 16,
+    padding: 16,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#F1F1F1',
+  },
+
+  deliveryInfoText: {
+    color: '#555555',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+
+  deliveryInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  orderStatusPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 12,
+    marginBottom: 10,
+    borderRadius: 999,
+  },
+
+  orderStatusPillDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+
+  orderStatusPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  sectionCount: {
+    color: '#8A8A8A',
+    fontSize: 12,
+    marginBottom: 10,
+  },
+
+  orderItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F2',
+  },
+
+  orderItemImage: {
+    width: 64,
+    height: 76,
+    borderRadius: 8,
+    backgroundColor: '#F6F6F6',
+  },
+
+  orderItemImagePlaceholder: {
+    width: 64,
+    height: 76,
+    borderRadius: 8,
+    backgroundColor: '#F6F6F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  orderItemCopy: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+
+  itemsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: 14,
+  },
+
+  itemsToggleText: {
+    color: '#111111',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 
   backFloatBtn: {
@@ -1474,6 +1727,14 @@ input: {
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 1,
+  },
+
+  orderTimelineDate: {
+    minHeight: 16,
+    marginTop: 4,
+    color: '#777777',
+    fontSize: 9,
+    textAlign: 'center',
   },
 
   // =========================
@@ -1711,17 +1972,6 @@ orderTimelineCurrentDot: {
   backgroundColor: '#FFFFFF',
 },
 
-orderTimelineLabel: {
-  marginTop: 10,
-  width: 112,
-  minHeight: 32,
-  textAlign: 'center',
-  fontSize: 9,
-  fontWeight: '700',
-  letterSpacing: 0.4,
-  color: '#9CA3AF',
-},
-
 orderTimelineCurrentBadge: {
   marginTop: 5,
   paddingHorizontal: 7,
@@ -1762,25 +2012,6 @@ orderTimelineSpecialText: {
 // SHEIN-STYLE ORDER TIMELINE
 // =========================
 
-orderTimelineOuter: {
-  width: '100%',
-  marginTop: 14,
-  overflow: 'hidden',
-},
-
-orderTimelineScrollContent: {
-  paddingHorizontal: 10,
-  paddingTop: 6,
-  paddingBottom: 14,
-  alignItems: 'flex-end',
-},
-
-orderTimelineStage: {
-  width: 120,
-  alignItems: 'center',
-  justifyContent: 'flex-start',
-},
-
 orderTimelineLabel: {
   width: 108,
   minHeight: 28,
@@ -1805,28 +2036,10 @@ orderTimelineTrackRow: {
   justifyContent: 'center',
 },
 
-orderTimelineConnector: {
-  flex: 1,
-  height: 2,
-  backgroundColor: '#E5E7EB',
-},
-
 orderTimelineConnectorPlaceholder: {
   flex: 1,
   height: 2,
   backgroundColor: 'transparent',
 },
 
-orderTimelinePoint: {
-  width: 7,
-  height: 7,
-  borderRadius: 4,
-
-  backgroundColor: '#FFFFFF',
-
-  borderWidth: 1.5,
-  borderColor: '#D4D4D8',
-
-  zIndex: 5,
-},
 });

@@ -255,6 +255,12 @@ export const products = pgTable(
 
     descriptionFa: text("description_fa"),
 
+    usageInstructions: text("usage_instructions"),
+
+    usageInstructionsPs: text("usage_instructions_ps"),
+
+    usageInstructionsFa: text("usage_instructions_fa"),
+
     // ======================================================
     // PRICING
     // ======================================================

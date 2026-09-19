@@ -738,18 +738,10 @@ export async function searchProductsByEmbedding(
 
 export function searchHomeProductsByEmbedding(
   embedding: number[],
-  categoryId: string
+  categoryId?: string
 ): Promise<VisualSearchResponse> {
   const normalizedCategoryId =
-    categoryId?.trim();
-
-  if (
-    !normalizedCategoryId
-  ) {
-    throw new Error(
-      'Please select a category before starting visual search.'
-    );
-  }
+    categoryId?.trim() || undefined;
 
   return searchProductsByEmbedding(
     embedding,

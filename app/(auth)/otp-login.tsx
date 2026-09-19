@@ -57,7 +57,7 @@ export default function OTPLogin() {
       await initOneSignal(cleanPhoneDigits).catch(() => {});
 
       const nativeSubscriptionStateId = await OneSignal.User.pushSubscription.getIdAsync().catch(() => null);
-      const finalTrackingHeaderToken = nativeSubscriptionStateId || cleanPhoneDigits;
+      const finalTrackingHeaderToken = nativeSubscriptionStateId;
 
       try {
         OneSignal.User.addAlias("user_id", cleanPhoneDigits);
@@ -67,7 +67,9 @@ export default function OTPLogin() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-onesignal-id': finalTrackingHeaderToken
+          ...(finalTrackingHeaderToken
+            ? { 'x-onesignal-id': finalTrackingHeaderToken }
+            : {}),
         },
         body: JSON.stringify({ phone: cleanPhoneDigits })
       });
@@ -135,16 +137,14 @@ export default function OTPLogin() {
         // Link OneSignal push channels to the authenticated user ID profile cell
         try {
           if (data.session.user?.id) {
-            const { OneSignal } = require('react-native-onesignal');
-            OneSignal.login(String(data.session.user.id).trim());
-            OneSignal.User.addAlias("user_id", cleanPhoneDigits);
+            await initOneSignal(String(data.session.user.id).trim());
           }
         } catch {}
 
         console.log("🚀 [ROUTING RUNWAY] Security gates passed. Swapping view channels to home runway.");
         
         // Perform direct navigation transition cleanly
-        router.replace('/');
+        router.replace('/(shop)');
         return; 
       } else {
         setLoading(false);

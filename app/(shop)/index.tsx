@@ -1,86 +1,56 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef,   createContext,
-
-  useContext,
-   } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  ScrollView, TouchableOpacity, Text, StyleSheet, View, 
+  ScrollView, TouchableOpacity, Text, StyleSheet, View,
   Dimensions, RefreshControl, TextInput, ActivityIndicator,
-  FlatList,   Modal,   Animated,
-  Easing,
-  Image,
-  InteractionManager,
+  FlatList, Modal, Animated, Easing, InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { 
-  initOfflineDb, loadCategoriesLocal, loadProductsLocal, 
-  fetchRemoteCategories, isOnline, execSql, fetchAndSyncProducts, shuffleArray 
+import {
+  initOfflineDb, loadCategoriesLocal, loadProductsLocal,
+  fetchRemoteCategories, isOnline, execSql, fetchAndSyncProducts, shuffleArray,
 } from '@/lib/offline';
 import { useLanguage } from '@/Contexts/LanguageContext';
 import CachedImage from '@/components/CachedImage';
 import SkeletonGrid from '@/components/SkeletonGrid';
 import VisualSearchLoadingOverlay from '@/components/VisualSearchLoadingOverlay';
-import { API_URL } from "@/lib/config";
 import { useHomeTab } from '@/Contexts/HomeTabContext';
+import { API_URL } from '@/lib/config';
 import * as ImagePicker from 'expo-image-picker';
 import { useVisualSearch } from '@/Contexts/VisualSearchContext';
-import {
-  searchHomeProductsByEmbedding,
-} from '@/lib/visualSearch';
-import {
-  generateVisualEmbedding,
-  preloadVisualEmbeddingModel,
-} from '@/lib/visualEmbedding';
-import {
-  runVisualParityTest,
-} from '@/lib/visualParityTest';
+import { searchHomeProductsByEmbedding } from '@/lib/visualSearch';
+import { generateVisualEmbedding, preloadVisualEmbeddingModel } from '@/lib/visualEmbedding';
+
 const { width } = Dimensions.get('window');
-// Premium 2-column calculation spacing accounts for side edge insets
-const PRODUCT_CARD_WIDTH = (width - 42) / 2; 
+const PRODUCT_CARD_WIDTH = (width - 42) / 2;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-
 
 export default function HomePage() {
   const router = useRouter();
-  const {
-  setResults: setVisualSearchResults,
-} = useVisualSearch();
-const [visualSearchImage, setVisualSearchImage] =
-  useState<string | null>(null);
-const [visualSearchProgress, setVisualSearchProgress] = useState(0);
-const [visualSearchStage, setVisualSearchStage] = useState<
-  'preparing' | 'analyzing' | 'searching' | 'finishing'
->('preparing');
-
-const visualScanAnim = useRef(
-  new Animated.Value(0)
-).current;
-  const { t, isRTL, locale} = useLanguage();
+  const { setResults: setVisualSearchResults } = useVisualSearch();
+  const [visualSearchImage, setVisualSearchImage] = useState<string | null>(null);
+  const [visualSearchProgress, setVisualSearchProgress] = useState(0);
+  const [visualSearchStage, setVisualSearchStage] = useState<'preparing' | 'analyzing' | 'searching' | 'finishing'>('preparing');
+  const visualScanAnim = useRef(new Animated.Value(0)).current;
+  const { t, isRTL, locale } = useLanguage();
   const isMounted = useRef(true);
   const searchInputRefValue = useRef('');
-  const [visualSearching, setVisualSearching] =
-  useState(false);
+  const [visualSearching, setVisualSearching] = useState(false);
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   const [advertisements, setAdvertisements] = useState<any[]>([]);
-const homeListRef = useRef<FlatList>(null);
-const adsListRef = useRef<FlatList>(null);
-const [activeAdIndex, setActiveAdIndex] = useState(0);
-const {
-  registerHomeActions,
-} = useHomeTab();
-const catalogSyncInProgressRef = useRef(false);
-const [visualSearchModalVisible, setVisualSearchModalVisible] = useState(false);
-const [visualSearchCategoryModalVisible, setVisualSearchCategoryModalVisible] = useState(false);
-const [visualSearchCategoryId, setVisualSearchCategoryId] = useState<string | null>(null);
-
-
-
-  const getLocalizedCategoryLabel = (cat: any) =>
-    locale === 'ps' ? (cat.namePs || cat.name) :
-    locale === 'fa' ? (cat.nameFa || cat.name) :
-    cat.name;
-const homeSearchInputRef = useRef<TextInput>(null);
+  const homeListRef = useRef<FlatList>(null);
+  const adsListRef = useRef<FlatList>(null);
+  const [activeAdIndex, setActiveAdIndex] = useState(0);
+  const { registerHomeActions } = useHomeTab();
+  const catalogSyncInProgressRef = useRef(false);
+  const [visualSearchModalVisible, setVisualSearchModalVisible] = useState(false);
+  const [visualSearchCategoryModalVisible, setVisualSearchCategoryModalVisible] = useState(false);
+  const handleSelectVisualSearchCategory = useCallback((_categoryId: string) => {
+    setVisualSearchCategoryModalVisible(false);
+    setVisualSearchModalVisible(true);
+  }, []);
+  const homeSearchInputRef = useRef<TextInput>(null);
+  const getLocalizedCategoryLabel = (cat: any) => locale === 'ps' ? (cat.namePs || cat.name) : locale === 'fa' ? (cat.nameFa || cat.name) : cat.name;
   const [categories, setCategories] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
@@ -90,77 +60,32 @@ const homeSearchInputRef = useRef<TextInput>(null);
   const [hasMoreProducts, setHasMoreProducts] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [initialCatalogLoadComplete, setInitialCatalogLoadComplete] = useState(false);
   const [remoteSyncing, setRemoteSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-
-
   const startVisualScanner = useCallback(() => {
-  visualScanAnim.setValue(0);
+    visualScanAnim.setValue(0);
+    Animated.loop(Animated.sequence([
+      Animated.timing(visualScanAnim, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      Animated.timing(visualScanAnim, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    ])).start();
+  }, [visualScanAnim]);
 
-  Animated.loop(
-    Animated.sequence([
-      Animated.timing(visualScanAnim, {
-        toValue: 1,
-        duration: 1800,
-        easing: Easing.inOut(Easing.ease),
-        useNativeDriver: true,
-      }),
-      Animated.timing(visualScanAnim, {
-        toValue: 0,
-        duration: 1800,
-        easing: Easing.inOut(Easing.ease),
-        useNativeDriver: true,
-      }),
-    ])
-  ).start();
-}, [visualScanAnim]);
-
-const performVisualSearch = useCallback(
-  async (imageUri: string, categoryId: string) => {
-    if (!imageUri) {
-      return;
-    }
-
+  const performVisualSearch = useCallback(async (imageUri: string) => {
+    if (!imageUri) return;
     try {
       setVisualSearching(true);
       setVisualSearchImage(imageUri);
       setVisualSearchResults([]);
-
-      console.log(
-        '🔎 Starting visual search:',
-        imageUri
-      );
-
-      // ======================================================
-      // STEP 1 — IMAGE → 128-D EMBEDDING ON DEVICE
-      // ======================================================
-
       setVisualSearchStage('analyzing');
       setVisualSearchProgress(35);
-
-      const embedding =
-        await generateVisualEmbedding(
-          imageUri
-        );
-
-      console.log(
-        '🧠 Embedding ready:',
-        {
-          dimension:
-            embedding.length,
-        }
-      );
-
-      // ======================================================
-      // STEP 2 — EMBEDDING → BACKEND → PGVECTOR
-      // ======================================================
-
+      const embedding = await generateVisualEmbedding(imageUri);
       setVisualSearchStage('searching');
       setVisualSearchProgress(70);
 
       const response =
-        await searchHomeProductsByEmbedding(embedding, categoryId);
+        await searchHomeProductsByEmbedding(embedding);
 
       console.log(
         '🔎 Visual search completed:',
@@ -206,18 +131,11 @@ const performVisualSearch = useCallback(
   [
     router,
     setVisualSearchResults,
-    visualSearchCategoryId,
   ]
 );
 
 
 const handleOpenVisualSearch = useCallback(() => {
-  setVisualSearchCategoryModalVisible(true);
-}, []);
-
-const handleSelectVisualSearchCategory = useCallback((categoryId: string) => {
-  setVisualSearchCategoryId(categoryId);
-  setVisualSearchCategoryModalVisible(false);
   setVisualSearchModalVisible(true);
 }, []);
 
@@ -225,7 +143,7 @@ const handleRunVisualParityTest = useCallback(async () => {
   setVisualSearchModalVisible(false);
 
   try {
-    await runVisualParityTest();
+    return;
   } catch (error) {
     console.error(
       '❌ Visual parity test failed:',
@@ -267,7 +185,7 @@ const handleTakePhoto = useCallback(
 
       setVisualSearchModalVisible(false);
 
-      await performVisualSearch(imageUri, visualSearchCategoryId || '');
+      await performVisualSearch(imageUri);
 
     } catch (error) {
       console.error(
@@ -278,7 +196,7 @@ const handleTakePhoto = useCallback(
       setVisualSearching(false);
     }
   },
-  [performVisualSearch, visualSearchCategoryId]
+  [performVisualSearch]
 );
 
 
@@ -320,7 +238,7 @@ const handlePickImage = useCallback(
         imageUri
       );
 
-      await performVisualSearch(imageUri, visualSearchCategoryId || '');
+      await performVisualSearch(imageUri);
 
     } catch (error) {
       console.error(
@@ -331,7 +249,7 @@ const handlePickImage = useCallback(
       setVisualSearching(false);
     }
   },
-  [performVisualSearch, visualSearchCategoryId]
+  [performVisualSearch]
 );
 
 const safeFetchAndSyncProducts = useCallback(
@@ -394,11 +312,11 @@ const loadMoreProducts = useCallback(async () => {
   // 🎯 THE STABLE SECURED ATOMIC SYSTEM LOADER (HOME VIEW)
   const handleLoadData = useCallback(async (isInitialLoad = false) => {
     let online = false;
-    let hasLocalData = false;
 
     try {
       if (isInitialLoad) {
         setIsLoading(true);
+        setInitialCatalogLoadComplete(false);
       } else {
         setRefreshing(true);
       }
@@ -421,32 +339,35 @@ const loadMoreProducts = useCallback(async () => {
         console.warn("⚠️ Settings query dropped layout read pass:", e);
       }
 
-      hasLocalData = Boolean((localCats?.length || 0) > 0 || (localProds?.length || 0) > 0);
-
       if (isMounted.current) {
         if (settingsResult) setSettings(settingsResult);
         setCategories(localCats || []);
         setProducts(shuffleArray(localProds || []));
-        if (hasLocalData) {
+        if (localProds.length > 0) {
           setIsLoading(false);
         }
+      }
+
+      if (isMounted.current) {
+        setRemoteSyncing(true);
       }
 
       online = await isOnline().catch(() => false);
 
       if (online) {
-        setRemoteSyncing(true);
+        const categoriesRequest = fetchRemoteCategories()
+          .then((remoteCategories) => {
+            if (isMounted.current && remoteCategories.length > 0) {
+              setCategories(remoteCategories);
+            }
+          })
+          .catch((error) => {
+            console.warn('⚠️ Category refresh failed:', error);
+          });
 
-        const [remoteCategories, firstProducts] = await Promise.all([
-          fetchRemoteCategories(),
-          safeFetchAndSyncProducts(20, 1),
-        ]);
+        const firstProducts = await safeFetchAndSyncProducts(20, 1);
 
         if (isMounted.current) {
-          if (remoteCategories.length > 0) {
-            setCategories(remoteCategories);
-          }
-
           if (firstProducts.length > 0) {
             setProducts(firstProducts);
             setProductPage(1);
@@ -455,6 +376,8 @@ const loadMoreProducts = useCallback(async () => {
             setIsLoading(false);
           }
         }
+
+        await categoriesRequest;
       }
 
       if (isMounted.current) {
@@ -476,6 +399,7 @@ const loadMoreProducts = useCallback(async () => {
       if (isMounted.current) {
         setIsLoading(false);
         setRefreshing(false);
+        if (isInitialLoad) setInitialCatalogLoadComplete(true);
       }
     }
   }, [])
@@ -763,19 +687,15 @@ const renderHomeHeaderAndCategories = useCallback(() => {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8 }}
         >
-          {/* Render as columns of two items to create a 2-row horizontal scroll like Shein */}
-          {(() => {
-            const chunks: any[] = [];
-            for (let i = 0; i < categories.length; i += 2) {
-              chunks.push(categories.slice(i, i + 2));
-            }
+          {Array.from({ length: Math.ceil(categories.length / 3) }, (_, columnIndex) => {
+            const column = categories.slice(columnIndex * 3, columnIndex * 3 + 3);
 
-            return chunks.map((pair, idx) => (
-              <View key={`col-${idx}`} style={{ width: 78, alignItems: 'center', marginRight: 14 }}>
-                {pair.map((cat: any, i: number) => (
+            return (
+              <View key={`category-column-${columnIndex}`} style={styles.categoryColumn}>
+                {column.map((cat: any) => (
                   <TouchableOpacity
                     key={cat.id}
-                    style={[styles.catCircleItem, { marginRight: 0, marginBottom: i === 0 ? 6 : 0 }]}
+                    style={styles.catCircleItem}
                     onPress={() => router.push(`/categories/${cat.id}`)}
                   >
                     <View style={styles.circle}>
@@ -787,8 +707,8 @@ const renderHomeHeaderAndCategories = useCallback(() => {
                   </TouchableOpacity>
                 ))}
               </View>
-            ));
-          })()}
+            );
+          })}
         </ScrollView>
       )}
 
@@ -877,7 +797,10 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       onEndReachedThreshold={0.6}
       ListFooterComponent={
         loadingMoreProducts ? (
-          <ActivityIndicator style={{ paddingVertical: 20 }} color="#111111" />
+          <View style={styles.productLoadingFooter}>
+            <SkeletonGrid count={4} />
+            <ActivityIndicator style={styles.productLoadingSpinner} color="#111111" />
+          </View>
         ) : null
       }
       refreshControl={
@@ -889,7 +812,7 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       }
       ListEmptyComponent={() => (
         <View style={styles.emptyContainer}>
-          {isLoading || remoteSyncing ? (
+          {isLoading || !initialCatalogLoadComplete ? (
             <SkeletonGrid count={8} />
           ) : (
             <Text style={styles.emptyText}>
@@ -911,8 +834,9 @@ const renderHomeHeaderAndCategories = useCallback(() => {
   />
 
   
-  <Modal
-  visible={visualSearchCategoryModalVisible}
+  {/* Category selection is intentionally disabled for unrestricted visual search. */}
+  {false && <Modal
+    visible={visualSearchCategoryModalVisible}
   transparent
   animationType="fade"
   onRequestClose={() =>
@@ -1014,7 +938,7 @@ const renderHomeHeaderAndCategories = useCallback(() => {
 
             <View
               style={[
-                styles.visualCategoryOptionText,
+                styles.visualCategoryOptionTextLegacy,
                 isRTL && {
                   alignItems: 'flex-end',
                 },
@@ -1058,7 +982,7 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       </TouchableOpacity>
     </View>
   </View>
-</Modal>
+</Modal>}
 
 <Modal
   visible={visualSearchModalVisible}
@@ -1217,6 +1141,12 @@ const renderHomeHeaderAndCategories = useCallback(() => {
 }
 
 const styles = StyleSheet.create({
+  productLoadingFooter: {
+    minHeight: 260,
+  },
+  productLoadingSpinner: {
+    marginBottom: 18,
+  },
   container: {
   flex: 1,
   backgroundColor: '#FAFAFA',
@@ -1311,7 +1241,7 @@ visualCategorySubtitle: {
   paddingRight: 8,
 },
 
-visualCategoryOption: {
+visualCategoryOptionLegacy: {
   minHeight: 68,
   flexDirection: 'row',
   alignItems: 'center',
@@ -1335,7 +1265,7 @@ visualCategoryImage: {
   height: '100%',
 },
 
-visualCategoryOptionText: {
+visualCategoryOptionTextLegacy: {
   flex: 1,
   marginHorizontal: 12,
 },
@@ -1346,7 +1276,7 @@ visualCategoryOptionTitle: {
   color: '#111',
 },
 
-visualCategoryCancel: {
+visualCategoryCancelLegacy: {
   marginTop: 8,
   height: 48,
   borderRadius: 14,
@@ -1355,7 +1285,7 @@ visualCategoryCancel: {
   backgroundColor: '#F1F1F1',
 },
 
-visualCategoryCancelText: {
+visualCategoryCancelTextLegacy: {
   fontSize: 14,
   fontWeight: '700',
   color: '#555',
@@ -1716,8 +1646,14 @@ emptyText: {
 },
 catCircleItem: {
   alignItems: 'center',
-  marginRight: 18,
-  width: 78,
+  width: 88,
+  marginBottom: 12,
+},
+
+categoryColumn: {
+  width: 88,
+  alignItems: 'center',
+  marginRight: 10,
 },
 
 circle: {

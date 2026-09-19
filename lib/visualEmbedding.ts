@@ -70,7 +70,7 @@ const PREPROCESSING_VERSION = 'v1';
 //   embedding [1, 512] float32
 //
 const MODEL_ASSET =
-  require('@/assets/ml/mobileclip_s0_image_encoder_fp32_embedded.onnx');
+  require('../assets/ml/mobileclip_s0_image_encoder_fp32_embedded.onnx');
 
 const PERSISTENT_MODEL_DIRECTORY = `${FileSystem.documentDirectory}models/`;
 const PERSISTENT_MODEL_URI = `${PERSISTENT_MODEL_DIRECTORY}mobileclip_s0_image_encoder_fp32_embedded.onnx`;

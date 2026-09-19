@@ -11,7 +11,7 @@
     "edgeToEdgeEnabled": true,
     "predictiveBackGestureEnabled": false,
     "usesCleartextTraffic": true,
-    "owner": "slliman",
+    "owner": "shah-suliman",
 
     "ios": {
       "supportsTablet": true,
@@ -65,16 +65,23 @@
 
     "plugins": [
       "expo-updates",
-
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "1080614298010140",
+          "clientToken": "a2f84e7ad71aa724ebba2fb932df30e0",
+          "displayName": "Brand Gallery Shopping",
+          "advertiserIDCollectionEnabled": true,
+          "autoLogAppEventsEnabled": true
+        }
+      ],
       [
         "expo-location",
         {
           "locationAlwaysPermission": "Allow Brand Gallery to access your location for delivery."
         }
       ],
-
       "expo-router",
-
       [
         "expo-build-properties",
         {
@@ -89,7 +96,6 @@
           }
         }
       ],
-
       [
         "expo-splash-screen",
         {
@@ -102,12 +108,10 @@
           }
         }
       ],
-
       "expo-secure-store",
       "expo-web-browser",
       "expo-sqlite",
-
-  "./plugins/with-onnxruntime",
+      "./plugins/with-onnxruntime",
       [
         "onesignal-expo-plugin",
         {
@@ -120,7 +124,7 @@
       "oneSignalAppId": "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d",
       "router": {},
       "eas": {
-        "projectId": "a1dc12ab-309d-46eb-9255-d0c09d926b29"
+        "projectId": "074c6e26-27f5-4c47-b086-5ee0955bd13b"
       }
     },
 
@@ -136,7 +140,7 @@
     "updates": {
       "enabled": true,
       "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/a1dc12ab-309d-46eb-9255-d0c09d926b29"
+      "url": "https://u.expo.dev/074c6e26-27f5-4c47-b086-5ee0955bd13b"
     }
   }
 }

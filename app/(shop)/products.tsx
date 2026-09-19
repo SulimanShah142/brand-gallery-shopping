@@ -95,6 +95,7 @@ export default function ProductsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [remoteSyncing, setRemoteSyncing] = useState(false);
   const [favorites, setFavorites] = useState<Record<string, boolean>>({});
+  const [catalogCount, setCatalogCount] = useState<number | null>(null);
   // ==========================================
   // 🎯 SECURED COMPLIANT SEQUENTIAL RE-FETCH INITIALIZER
   // ==========================================
@@ -109,6 +110,7 @@ export default function ProductsScreen() {
       const settingsResult = await execSql('SELECT * FROM app_settings LIMIT 1;').catch(() => []);
       
       setProducts(shuffleArray(localProds || []));
+      if (catalogCount === null) setCatalogCount(localProds?.length || 0);
       
       if (settingsResult && settingsResult.length > 0) {
         setSettings(settingsResult[0]); 
@@ -174,6 +176,15 @@ export default function ProductsScreen() {
 
   useEffect(() => {
     setupAndLoad();
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/products?limit=1`)
+      .then((response) => {
+        const total = Number(response.headers.get('x-total-count'));
+        if (Number.isFinite(total) && total >= 0) setCatalogCount(total);
+      })
+      .catch(() => {});
   }, []);
 
   const onRefresh = async () => {
@@ -258,13 +269,13 @@ const addToCart = (product: any) => {
       <ProductsHeader
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        filteredCount={filteredProducts.length}
+        filteredCount={catalogCount ?? filteredProducts.length}
         isRTL={isRTL}
         t={t}
         toLocalNumbers={toLocalNumbers}
       />
     );
-  }, [searchQuery, filteredProducts.length, isRTL, t, toLocalNumbers]);
+  }, [searchQuery, filteredProducts.length, catalogCount, isRTL, t, toLocalNumbers]);
 
   const renderProduct = useCallback(({ item }: { item: any }) => {
     const productTitle =

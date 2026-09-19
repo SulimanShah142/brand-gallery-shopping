@@ -55,6 +55,9 @@ export async function initOfflineDb() {
             description TEXT,
             descriptionPs TEXT,
             descriptionFa TEXT,
+            usageInstructions TEXT,
+            usageInstructionsPs TEXT,
+            usageInstructionsFa TEXT,
             imageUrl TEXT,
             parentId TEXT,
             isActive INTEGER DEFAULT 1
@@ -142,6 +145,9 @@ export async function initOfflineDb() {
       await ensureColumnExists(database, 'products', 'nameFa', 'TEXT');
       await ensureColumnExists(database, 'products', 'descriptionPs', 'TEXT');
       await ensureColumnExists(database, 'products', 'descriptionFa', 'TEXT');
+      await ensureColumnExists(database, 'products', 'usageInstructions', 'TEXT');
+      await ensureColumnExists(database, 'products', 'usageInstructionsPs', 'TEXT');
+      await ensureColumnExists(database, 'products', 'usageInstructionsFa', 'TEXT');
       await ensureColumnExists(database, 'products', 'availableSizes', 'TEXT');
       await ensureColumnExists(database, 'products', 'availableColorsPs', 'TEXT');
       await ensureColumnExists(database, 'products', 'availableColorsFa', 'TEXT');
@@ -349,8 +355,8 @@ export async function saveProducts(products: any[], pruneMissing = false) {
       // Upsert products to avoid wiping local-only rows
       for (const p of products) {
         await database.runAsync(
-          `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usageInstructions, usageInstructionsPs, usageInstructionsFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             p.id,
             p.categoryId,
@@ -360,6 +366,9 @@ export async function saveProducts(products: any[], pruneMissing = false) {
             p.description || null,
             p.descriptionPs || null,
             p.descriptionFa || null,
+            p.usageInstructions || null,
+            p.usageInstructionsPs || null,
+            p.usageInstructionsFa || null,
             p.usdPrice?.toString() || '0',
             p.profitPercentage ?? 20,
             p.imageUrl || null,
@@ -403,12 +412,11 @@ export async function isOnline(): Promise<boolean> {
     if (!connected) return false;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); 
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     
     try {
-      const response = await fetch(`${API_URL}/api/categories`, { 
-        method: 'HEAD', 
-        signal: controller.signal 
+      const response = await fetch(`${API_URL}/api/categories`, {
+        signal: controller.signal,
       });
       clearTimeout(timeoutId);
       return response.ok;
@@ -422,9 +430,11 @@ export async function isOnline(): Promise<boolean> {
 }
 
 export async function fetchRemoteCategories() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
     console.log('📡 Fetching remote categories...');
-    const response = await fetch(`${API_URL}/api/categories`);
+    const response = await fetch(`${API_URL}/api/categories`, { signal: controller.signal });
     if (!response.ok) {
       throw new Error(`Failed to fetch remote categories: ${response.status}`);
     }
@@ -434,6 +444,8 @@ export async function fetchRemoteCategories() {
   } catch (error) {
     console.warn('❌ Remote categories fetch failed', error);
     return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -617,8 +629,8 @@ async function databaseOpSaveCategoryProducts(products: any[]) {
   await database.withTransactionAsync(async () => {
     for (const p of products) {
       await database.runAsync(
-        `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR REPLACE INTO products (id, categoryId, name, namePs, nameFa, description, descriptionPs, descriptionFa, usageInstructions, usageInstructionsPs, usageInstructionsFa, usdPrice, profitPercentage, imageUrl, availableSizes, availableColors, availableColorsPs, availableColorsFa, stockQuantity, isAvailable)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           p.id,
           p.categoryId,
@@ -628,6 +640,9 @@ async function databaseOpSaveCategoryProducts(products: any[]) {
           p.description || null,
           p.descriptionPs || null,
           p.descriptionFa || null,
+            p.usageInstructions || null,
+            p.usageInstructionsPs || null,
+            p.usageInstructionsFa || null,
           p.usdPrice?.toString() || '0',
           p.profitPercentage ?? 20,
           p.imageUrl || null,

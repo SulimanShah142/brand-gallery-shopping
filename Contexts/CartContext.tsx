@@ -54,7 +54,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         id: product.id,
         name: product.name,
         price: parseFloat(product.price || product.retailPrice || '0'),
-        imageUrl: product.imageUrl,
+        imageUrl: product.cartImageUrl || product.imageUrl,
         quantity: quantity,
         selectedSize: selectedSize || 'M',
         selectedColor: selectedColor || 'Standard',

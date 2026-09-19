@@ -906,7 +906,10 @@ const renderCartItem = ({
   // IMAGE
   // ==========================================================
 
+  const selectedColorImages = liveProductMatch?.colorImages?.[item?.selectedColor] ||
+    liveProductMatch?.colorImageUrls?.[item?.selectedColor];
   const imageUri =
+    (Array.isArray(selectedColorImages) ? selectedColorImages[0] : selectedColorImages) ||
     item?.imageUrl ||
     liveProductMatch?.imageUrl ||
     liveProductMatch?.image_url;
