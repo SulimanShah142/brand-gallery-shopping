@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 const ONESIGNAL_APP_ID = "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d";
 let oneSignalInitialized = false;
 let foregroundListenerAttached = false;
+let oneSignalInitPromise: Promise<void> | null = null;
 
 const waitForSubscriptionId = async (attempts = 10): Promise<string | null> => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -16,7 +17,22 @@ const waitForSubscriptionId = async (attempts = 10): Promise<string | null> => {
 
 // 🎯 THE BALANCING PROXIES FIX: Added an optional custom user ID parameter slot!
 export const initOneSignal = async (authenticatedUserId?: string | null) => {
+  if (oneSignalInitPromise) {
+    await oneSignalInitPromise;
+  } else {
+    oneSignalInitPromise = initializeOneSignal();
+    await oneSignalInitPromise;
+  }
+
+  if (authenticatedUserId) {
+    await linkOneSignalUser(authenticatedUserId);
+  }
+};
+
+async function initializeOneSignal() {
   try {
+    const shouldRequestPermission = !oneSignalInitialized;
+
     // 1. Initialize with your specific App ID
     if (!oneSignalInitialized) {
       OneSignal.initialize(ONESIGNAL_APP_ID);
@@ -40,7 +56,7 @@ export const initOneSignal = async (authenticatedUserId?: string | null) => {
 
 
     // 2. CRITICAL FIX FOR ANDROID 13+: Explicitly force OneSignal to handle the permission prompt
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' && shouldRequestPermission) {
       console.log("🛰️ Triggering Native OneSignal Android Permission Prompt...");
       const accepted = await OneSignal.Notifications.requestPermission(true);
       console.log("🔔 OneSignal Permission State Checked:", accepted);
@@ -49,27 +65,27 @@ export const initOneSignal = async (authenticatedUserId?: string | null) => {
     }
 
     // 3. Capture and log the structural Subscription ID
-    const subId = authenticatedUserId
-      ? await waitForSubscriptionId()
-      : null;
+    const subId = await waitForSubscriptionId();
     console.log("🔑 Active Linked Hardware ID:", subId);
 
-    // 🎯 THE CRITICAL SYNCHRONIZATION ALIGNMENT GATE:
-    // If a user is active, log them into OneSignal via External ID right now to unfreeze channels!
-    if (authenticatedUserId) {
-      let finalOneSignalAliasKey = authenticatedUserId.trim();
+  } catch (error) {
+    console.error("❌ OneSignal Native Boot Failure:", error);
+  }
+}
+
+async function linkOneSignalUser(authenticatedUserId: string) {
+  try {
+    let finalOneSignalAliasKey = authenticatedUserId.trim();
       
       // Symmetrically map raw phone string indices matching your backend routing logic footprints
       if (!finalOneSignalAliasKey.includes('@') && /^\d+$/.test(finalOneSignalAliasKey)) {
         finalOneSignalAliasKey = `${finalOneSignalAliasKey}@phone.local`;
       }
 
-      console.log(`✅ [ONESIGNAL] Mapping user alias signature: ${finalOneSignalAliasKey}`);
-      await Promise.resolve(OneSignal.login(finalOneSignalAliasKey));
-      await Promise.resolve(OneSignal.User.addAlias('phone', finalOneSignalAliasKey));
-    }
-
+    console.log(`✅ [ONESIGNAL] Mapping user alias signature: ${finalOneSignalAliasKey}`);
+    await Promise.resolve(OneSignal.login(finalOneSignalAliasKey));
+    await Promise.resolve(OneSignal.User.addAlias('phone', finalOneSignalAliasKey));
   } catch (error) {
-    console.error("❌ OneSignal Native Boot Failure:", error);
+    console.error("❌ OneSignal user link failure:", error);
   }
-};
+}

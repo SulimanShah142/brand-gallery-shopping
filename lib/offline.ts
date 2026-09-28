@@ -742,6 +742,24 @@ export async function getOrCreateConversation(userId: string) {
       });
       
       if (response.ok) {
+        const remoteConversation = await response.json().catch(() => null);
+        const remoteId = remoteConversation?.id;
+
+        if (remoteId && remoteId !== conversation.id) {
+          await database.runAsync(
+            'UPDATE conversations SET id = ? WHERE id = ?',
+            [remoteId, conversation.id]
+          );
+          await database.runAsync(
+            'UPDATE messages SET conversationId = ? WHERE conversationId = ?',
+            [remoteId, conversation.id]
+          );
+        }
+
+        if (remoteConversation) {
+          conversation = { ...conversation, ...remoteConversation };
+        }
+
         console.log("✅ Conversation synced to server with UUID:", conversation.id);
       } else {
         const errText = await response.text();

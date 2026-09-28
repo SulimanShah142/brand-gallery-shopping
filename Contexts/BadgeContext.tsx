@@ -32,7 +32,10 @@ export function BadgeProvider({ children }: { children: React.ReactNode }) {
         setAdminOrdersBadge(prev => prev + 1);
       }
       // Route B: User Support Chat Message Signal
-      if (rawData?.type === 'NEW_CHAT_MESSAGE_USER') {
+      if (
+        rawData?.type === 'NEW_CHAT_MESSAGE_USER' ||
+        rawData?.type === 'CHAT'
+      ) {
         setUserChatBadge(prev => prev + 1);
       }
       // Route C: Deliverer Package Assignment Signal

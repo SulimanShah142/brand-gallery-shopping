@@ -2,8 +2,17 @@ import {
   pgTable, text, timestamp, boolean, uuid, pgEnum, 
   integer, numeric, decimal, index ,uniqueIndex,
    foreignKey, real, varchar,
-   jsonb
+  jsonb,   vector
+
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+
+// Stage 1 product-image embeddings are written by the ML indexer and read
+// by the visual-search routes. The category is intentionally not duplicated
+// here: products.categoryId is the single source of truth for categorization.
+// Keeping this external table in Drizzle prevents schema push from treating
+// the existing embedding data as a table that should be dropped.
+
 // 1. Roles Enum (Marketplace wide)
 export const roleEnum = pgEnum('user_role', ['admin', 'seller', 'deliverer', 'customer']);
 
@@ -74,7 +83,7 @@ export const user = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     emailIdx: uniqueIndex(
       "user_email_idx"
     ).on(table.email),
@@ -118,7 +127,7 @@ export const session = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     tokenIdx: uniqueIndex(
       "session_token_idx"
     ).on(table.token),
@@ -155,7 +164,7 @@ export const verification = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     identifierIdx: index(
       "verification_identifier_idx"
     ).on(table.identifier),
@@ -223,10 +232,13 @@ export const categories = pgTable('categories', {
 // =========================================================================
 // 🎯 PRODUCTS
 // =========================================================================
-
 export const products = pgTable(
   "products",
   {
+    // ======================================================
+    // IDENTITY
+    // ======================================================
+
     id: uuid("id")
       .primaryKey()
       .defaultRandom(),
@@ -279,54 +291,171 @@ export const products = pgTable(
     ).default("20.00"),
 
     // ======================================================
-    // MAIN PRODUCT IMAGE
+    // MAIN / COVER IMAGE
     // ======================================================
 
     imageUrl: text("image_url"),
 
+
+    
     // ======================================================
     // LEGACY COLOR IMAGE SYSTEM
-    //
-    // Keep these for compatibility with the existing
-    // backend/frontend until everything is migrated.
-    // New color functionality should use productColors.
     // ======================================================
 
-    colorImageUrls: text("color_image_urls").array(),
+    colorImageUrls: text(
+      "color_image_urls"
+    ).array(),
 
     // ======================================================
-    // LEGACY SIZE/COLOR ARRAYS
-    //
-    // Keep them for compatibility with existing code.
-    // The new detailed color system uses productColors.
+    // LEGACY SIZE / COLOR ARRAYS
     // ======================================================
 
-    availableSizes: text("available_sizes").array(),
+    availableSizes: text(
+      "available_sizes"
+    ).array(),
 
-    availableColors: text("available_colors").array(),
+    availableColors: text(
+      "available_colors"
+    ).array(),
 
-    availableColorsPs: text("available_colors_ps").array(),
+    availableColorsPs: text(
+      "available_colors_ps"
+    ).array(),
 
-    availableColorsFa: text("available_colors_fa").array(),
+    availableColorsFa: text(
+      "available_colors_fa"
+    ).array(),
 
     // ======================================================
     // STOCK
     // ======================================================
 
-    stockQuantity: integer("stock_quantity")
-      .default(0),
+    stockQuantity: integer(
+      "stock_quantity"
+    )
+      .default(0)
+      .notNull(),
 
-    isAvailable: boolean("is_available")
-      .notNull()
-      .default(true),
+    isAvailable: boolean(
+      "is_available"
+    )
+      .default(true)
+      .notNull(),
+
+    // ======================================================
+    // ======================================================
+    // AI / VISUAL SEARCH
+    // ======================================================
+    // ======================================================
+    //
+    // We store the embeddings directly on the product.
+    //
+    // Query image
+    //      ↓
+    // DINOv2
+    //      ↓
+    // 768 dimensions
+    //      ↓
+    // products.imageEmbedding
+    //
+    // DINO is used as a second visual signal during
+    // verification / ranking.
+    // ======================================================
+
+    // ------------------------------------------------------
+    // DINO EMBEDDING
+    // ------------------------------------------------------
+    //
+    // Model:
+    // facebook/dinov2-base
+    //
+    // Dimension:
+    // 768
+    //
+    // NULL = product has not been indexed yet.
+    //
+
+    imageEmbedding: vector(
+      "image_embedding",
+      {
+        dimensions: 768,
+      }
+    ),
+
+    // ------------------------------------------------------
+    // DINO EMBEDDING
+    // ------------------------------------------------------
+    //
+    // Model:
+    // facebook/dinov2-base
+    //
+    // Dimension:
+    // 768
+    //
+    // Used for stronger visual verification / reranking.
+    //
+
+    dinoEmbedding: vector(
+      "dino_embedding",
+      {
+        dimensions: 768,
+      }
+    ),
+
+    // ------------------------------------------------------
+    // CLIP MODEL METADATA
+    // ------------------------------------------------------
+
+    imageEmbeddingModel: text(
+      "image_embedding_model"
+    ),
+
+    // ------------------------------------------------------
+    // DINO MODEL METADATA
+    // ------------------------------------------------------
+
+    dinoEmbeddingModel: text(
+      "dino_embedding_model"
+    ),
+
+    // ------------------------------------------------------
+    // EMBEDDING PIPELINE VERSION
+    // ------------------------------------------------------
+    //
+    // Example:
+    // "v1"
+    //
+    // If we change preprocessing/models later:
+    //
+    // v1 → v2
+    //
+    // We can re-index without changing product data.
+    //
+
+    imageEmbeddingVersion: text(
+      "image_embedding_version"
+    ),
+
+    // ------------------------------------------------------
+    // WHEN AI INDEXING WAS LAST PERFORMED
+    // ------------------------------------------------------
+
+    imageEmbeddingUpdatedAt: timestamp(
+      "image_embedding_updated_at",
+      {
+        withTimezone: true,
+      }
+    ),
 
     // ======================================================
     // SOFT DELETE
     // ======================================================
 
-    isDeleted: boolean("is_deleted")
-      .notNull()
-      .default(false),
+    isDeleted: boolean(
+      "is_deleted"
+    )
+      .default(false)
+      .notNull(),
 
     deletedAt: timestamp(
       "deleted_at",
@@ -340,18 +469,69 @@ export const products = pgTable(
     // ======================================================
 
     createdAt: timestamp(
-      "created_at"
+      "created_at",
+      {
+        withTimezone: true,
+      }
     )
-      .defaultNow(),
+      .defaultNow()
+      .notNull(),
 
     updatedAt: timestamp(
-      "updated_at"
+      "updated_at",
+      {
+        withTimezone: true,
+      }
     )
-      .defaultNow(),
-  }
+      .defaultNow()
+      .notNull(),
+  },
+
+  // ========================================================
+  // VECTOR SEARCH INDEXES
+  // ========================================================
+
+  (table: any) => [
+    // ------------------------------------------------------
+    // CLIP HNSW INDEX
+    // ------------------------------------------------------
+    //
+    // Used for fast visual-search retrieval.
+    //
+
+    index(
+      "products_image_embedding_hnsw_idx"
+    ).using(
+      "hnsw",
+      table.imageEmbedding.op(
+        "vector_cosine_ops"
+      )
+    ),
+
+    // ------------------------------------------------------
+    // DINO HNSW INDEX
+    // ------------------------------------------------------
+    //
+    // Used when comparing/reranking visual similarity
+    // with DINO embeddings.
+    //
+
+    index(
+      "products_dino_embedding_hnsw_idx"
+    ).using(
+      "hnsw",
+      table.dinoEmbedding.op(
+        "vector_cosine_ops"
+      )
+    ),
+
+    index(
+      "products_category_active_idx"
+    )
+      .on(table.categoryId)
+      .where(sql`${table.isDeleted} = false`),
+  ]
 );
-
-
 
 export const productVariants = pgTable('product_variants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -451,7 +631,7 @@ export const productColors = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     productIdx: index(
       "product_colors_product_idx"
     ).on(table.productId),
@@ -526,11 +706,213 @@ export const productSizeGuides = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table: any) => ({
     productIdx: index(
       "product_size_guides_product_idx"
     ).on(table.productId),
   })
+);
+
+
+
+// ======================================================
+// 🤖 MOBILECLIP IMAGE EMBEDDINGS
+// ======================================================
+//
+// One row = one catalog image.
+//
+// Product
+//   ├── main image
+//   ├── black image
+//   ├── white image
+//   └── blue image
+//
+// Model:
+// MobileCLIP-S0
+//
+// Dimension:
+// 512
+//
+// This table is completely separate from the legacy
+// 128-dimensional embedding system.
+// ======================================================
+
+// ============================================================
+// MOBILECLIP IMAGE EMBEDDINGS
+// ============================================================
+//
+// One row = one catalog image.
+//
+// Product
+//   ├── image 1 → MobileCLIP 512-D
+//   ├── image 2 → MobileCLIP 512-D
+//   └── color image → MobileCLIP 512-D
+//
+// Runtime:
+//
+// Phone image
+//      ↓
+// MobileCLIP-S0
+//      ↓
+// 512-D embedding
+//      ↓
+// Hono
+//      ↓
+// pgvector cosine search
+//      ↓
+// nearest catalog images
+//      ↓
+// aggregate by product
+//      ↓
+// products
+//
+// ============================================================
+
+export const productMobileClipEmbeddings = pgTable(
+  "product_mobileclip_embeddings",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .defaultRandom(),
+
+    // ----------------------------------------------------------
+    // PRODUCT
+    // ----------------------------------------------------------
+
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, {
+        onDelete: "cascade",
+      }),
+
+    // ----------------------------------------------------------
+    // OPTIONAL COLOR
+    // ----------------------------------------------------------
+    //
+    // NULL = normal/main product image
+    //
+    // Otherwise this points to the specific product color.
+    //
+
+    productColorId: uuid("product_color_id")
+      .references(() => productColors.id, {
+        onDelete: "set null",
+      }),
+
+    // ----------------------------------------------------------
+    // IMAGE
+    // ----------------------------------------------------------
+
+    imageUrl: text("image_url")
+      .notNull(),
+
+    // ----------------------------------------------------------
+    // MOBILECLIP EMBEDDING
+    // ----------------------------------------------------------
+    //
+    // MobileCLIP-S0
+    // 512 dimensions
+    //
+
+    embedding: vector("embedding", {
+      dimensions: 512,
+    }).notNull(),
+
+    // ----------------------------------------------------------
+    // MODEL METADATA
+    // ----------------------------------------------------------
+
+    model: text("model")
+      .notNull(),
+
+    version: text("version")
+      .notNull(),
+
+    // ----------------------------------------------------------
+    // PREPROCESSING VERSION
+    // ----------------------------------------------------------
+    //
+    // Extremely important because catalog and phone
+    // preprocessing must remain identical.
+    //
+
+    preprocessingVersion: text(
+      "preprocessing_version"
+    )
+      .notNull()
+      .default("v1"),
+
+    // ----------------------------------------------------------
+    // INDEXING STATUS
+    // ----------------------------------------------------------
+
+    indexedAt: timestamp(
+      "indexed_at",
+      {
+        withTimezone: true,
+      }
+    ),
+
+    createdAt: timestamp(
+      "created_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .defaultNow()
+      .notNull(),
+
+    updatedAt: timestamp(
+      "updated_at",
+      {
+        withTimezone: true,
+      }
+    )
+      .defaultNow()
+      .notNull(),
+  },
+
+  (table: any) => [
+    // --------------------------------------------------------
+    // PRODUCT LOOKUP
+    // --------------------------------------------------------
+
+    index(
+      "product_mobileclip_embeddings_product_idx"
+    ).on(table.productId),
+
+    // --------------------------------------------------------
+    // COLOR LOOKUP
+    // --------------------------------------------------------
+
+    index(
+      "product_mobileclip_embeddings_color_idx"
+    ).on(table.productColorId),
+
+    // --------------------------------------------------------
+    // MODEL / VERSION LOOKUP
+    // --------------------------------------------------------
+
+    index(
+      "product_mobileclip_embeddings_model_version_idx"
+    ).on(
+      table.model,
+      table.version
+    ),
+
+    // --------------------------------------------------------
+    // MOBILECLIP HNSW
+    // --------------------------------------------------------
+
+    index(
+      "product_mobileclip_embeddings_hnsw_idx"
+    ).using(
+      "hnsw",
+      table.embedding.op(
+        "vector_cosine_ops"
+      )
+    ),
+  ]
 );
 
 
@@ -592,7 +974,7 @@ export const productSizeGuideRows = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => ({
+  (table : any) => ({
     sizeGuideIdx: index(
       "product_size_guide_rows_guide_idx"
     ).on(table.sizeGuideId),
@@ -687,7 +1069,7 @@ export const messages = pgTable("messages", {
   // Dynamically points to the precise timestamp when the database evicts this data row!
   expiresAt: timestamp("expires_at", { withTimezone: true })
     .notNull(),
-}, (table) => ({
+}, (table: any) => ({
   createdAtIndex: index("msg_created_at_idx").on(table.createdAt),
   // 🎯 EXPRIATION INDEX: Makes the background cleaning scans extremely fast
   expiresAtIndex: index("msg_expires_at_idx").on(table.expiresAt),
@@ -752,7 +1134,8 @@ export const orders = pgTable("orders", {
   phoneNumber: text("phone_number")
     .notNull(),
 
-  whatsappNumber: text("whatsapp_number"),
+  whatsappNumber: text("whatsapp_number")
+  ,
 
   address: text("address")
     .notNull(),

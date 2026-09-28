@@ -56,18 +56,6 @@ export default function Boot() {
           hasProductDeepLink
         );
 
-        // Wrap OneSignal init to catch any unexpected errors
-        await initOneSignal(null).catch((err) => {
-          console.log('OneSignal initialization safe-catch:', err);
-        });
-
-        // Initialize auth client safely
-        try {
-          await authClient.initClientAsync();
-        } catch (err) {
-          console.log('authClient.initClientAsync failed:', err);
-        }
-
         // ================================================
         // LOAD LOCAL STORAGE
         // ================================================
@@ -100,6 +88,10 @@ export default function Boot() {
         if (!token || !cachedUserString) {
           authClient.setSessionData(null);
 
+          void initOneSignal(null).catch((error) => {
+            console.log('OneSignal guest initialization failed:', error);
+          });
+
           if (!isGuest) {
             await SecureStore.setItemAsync("guest_mode", "true").catch(() => {});
             console.log("🔐 No session found, allowing guest browsing");
@@ -110,6 +102,7 @@ export default function Boot() {
           if (segments[0] == null && !hasProductDeepLink) {
             safeReplace("/(shop)");
           }
+
           return;
         }
 
@@ -127,7 +120,7 @@ export default function Boot() {
             user: cachedUser,
           });
 
-          await initOneSignal(cachedUser?.id || null).catch((error) => {
+          void initOneSignal(cachedUser?.id || null).catch((error) => {
             console.log('OneSignal authenticated restore failed:', error);
           });
         } catch (err) {

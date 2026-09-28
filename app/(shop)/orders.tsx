@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,StyleSheet
+  ,Image
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -23,6 +24,11 @@ type Order = {
   totalAmount?: number;
   rejectionReason?: string;
   reason?: string;
+  items?: Array<{
+    productName?: string;
+    imageUrl?: string;
+    quantity?: number;
+  }>;
 };
 
 // =========================
@@ -234,6 +240,7 @@ export default function MyOrdersScreen() {
   // =========================
 const renderOrder = ({ item }: { item: Order }) => {
   const config = getStatusStyle(item.status);
+  const firstItem = item.items?.[0];
 
   const normalizedStatus = normalizeStatus(item.status);
 
@@ -272,14 +279,29 @@ const renderOrder = ({ item }: { item: Order }) => {
           alignItems: 'center',
         }}
       >
-        <Text
-          style={{
-            textAlign: isRTL ? 'right' : 'left',
-            fontWeight: '700',
-          }}
-        >
-          ORDER #{item.id?.slice(0, 8)?.toUpperCase() || 'N/A'}
-        </Text>
+        <View style={{ flexDirection: isRTL ? 'row-reverse' : 'row', alignItems: 'center', flex: 1 }}>
+          {firstItem?.imageUrl ? (
+            <Image
+              source={{ uri: firstItem.imageUrl }}
+              style={{ width: 58, height: 58, borderRadius: 10, marginRight: isRTL ? 0 : 10, marginLeft: isRTL ? 10 : 0, backgroundColor: '#F3F4F6' }}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={{ width: 58, height: 58, borderRadius: 10, marginRight: isRTL ? 0 : 10, marginLeft: isRTL ? 10 : 0, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="cube-outline" size={24} color="#9CA3AF" />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ textAlign: isRTL ? 'right' : 'left', fontWeight: '700' }} numberOfLines={1}>
+              {firstItem?.productName || 'Order'}
+            </Text>
+            {!!firstItem?.quantity && (
+              <Text style={{ marginTop: 4, fontSize: 12, color: '#6B7280', textAlign: isRTL ? 'right' : 'left' }}>
+                {isRTL ? `${toLocalNumbers(firstItem.quantity)} items` : `${firstItem.quantity} ${firstItem.quantity === 1 ? 'item' : 'items'}`}
+              </Text>
+            )}
+          </View>
+        </View>
 
         <View
           style={{

@@ -1,26 +1,76 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from "react";
-import { Linking } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
+import { InteractionManager, Linking } from 'react-native';
 import { Settings, AppLink } from 'react-native-fbsdk-next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { LanguageProvider } from '@/Contexts/LanguageContext';
 import { CartProvider } from '@/Contexts/CartContext';
 import { BadgeProvider } from '@/Contexts/BadgeContext';
+import { initOneSignal } from '@/lib/notiifcations';
+import { authClient } from '@/lib/auth-client';
+import { AppUpdateBanner } from '@/components/AppUpdateBanner';
+
+function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    let unsubscribe: (() => void) | undefined;
+
+    initOneSignal(null)
+      .catch((error) => {
+        console.warn('OneSignal root initialization failed:', error);
+      })
+      .then(() => {
+        if (!mounted) return;
+
+        unsubscribe = authClient.subscribe((session) => {
+          const userId = session?.user?.id;
+          if (userId) {
+            void initOneSignal(String(userId)).catch((error) => {
+              console.warn('OneSignal user linking failed:', error);
+            });
+          }
+        });
+      })
+      .finally(() => {
+        if (mounted) setInitialized(true);
+      });
+
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  if (!initialized) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  return <>{children}</>;
+}
 
 function DeepLinkHandler() {
   const router = useRouter();
   const navigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // ---------------------------------------------------------
-    // 1. Initialize Meta/Facebook SDK
-    // ---------------------------------------------------------
-    try {
-      Settings.initializeSDK();
-    } catch (error) {
-      console.warn('Meta SDK initialization error:', error);
-    }
+    const nativeSdkTask = InteractionManager.runAfterInteractions(() => {
+      const timer = setTimeout(() => {
+        try {
+          Settings.initializeSDK();
+        } catch (error) {
+          console.warn('Meta SDK initialization error:', error);
+        }
+      }, 1200);
+      return () => clearTimeout(timer);
+    });
 
     // ---------------------------------------------------------
     // 2. Navigate to a product safely
@@ -163,50 +213,36 @@ function DeepLinkHandler() {
     //
     // App was completely closed and opened through a URL.
     // ---------------------------------------------------------
-    Linking.getInitialURL()
-      .then((url) => {
-        if (url) {
-          console.log(
-            'DeepLinkHandler initial URL:',
-            url
-          );
-
-          parseAndNavigate(url);
-        }
-      })
-      .catch((error) => {
-        console.warn(
-          'DeepLinkHandler getInitialURL error:',
-          error
-        );
-      });
+    const initialUrlTimer = setTimeout(() => {
+      Linking.getInitialURL()
+        .then((url) => {
+          if (url) {
+            console.log('DeepLinkHandler initial URL:', url);
+            parseAndNavigate(url);
+          }
+        })
+        .catch((error) => {
+          console.warn('DeepLinkHandler getInitialURL error:', error);
+        });
+    }, 1500);
 
     // ---------------------------------------------------------
     // 5. Meta deferred deep link
     //
     // User clicked Meta ad -> installed app -> first launch.
     // ---------------------------------------------------------
-    AppLink.fetchDeferredAppLink()
-      .then((url) => {
-        if (url) {
-          console.log(
-            'DeepLinkHandler Meta deferred URL:',
-            url
-          );
-
-          parseAndNavigate(url);
-        } else {
-          console.log(
-            'DeepLinkHandler: no Meta deferred app link.'
-          );
-        }
-      })
-      .catch((error) => {
-        console.warn(
-          'DeepLinkHandler Meta deferred app link error:',
-          error
-        );
-      });
+    const deferredAppLinkTask = InteractionManager.runAfterInteractions(() => {
+      const timer = setTimeout(() => {
+        AppLink.fetchDeferredAppLink()
+          .then((url) => {
+            if (url) parseAndNavigate(url);
+          })
+          .catch((error) => {
+            console.warn('DeepLinkHandler Meta deferred app link error:', error);
+          });
+      }, 1800);
+      return () => clearTimeout(timer);
+    });
 
     // ---------------------------------------------------------
     // 6. Runtime deep links
@@ -230,6 +266,9 @@ function DeepLinkHandler() {
     // ---------------------------------------------------------
     return () => {
       subscription.remove();
+      nativeSdkTask.cancel();
+      deferredAppLinkTask.cancel();
+      clearTimeout(initialUrlTimer);
 
       if (navigationTimerRef.current) {
         clearTimeout(navigationTimerRef.current);
@@ -243,19 +282,23 @@ function DeepLinkHandler() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <LanguageProvider>
-        <CartProvider>
-          <BadgeProvider>
-            <DeepLinkHandler />
+      <OneSignalBootstrap>
+        <LanguageProvider>
+          <CartProvider>
+            <BadgeProvider>
+              <DeepLinkHandler />
 
-            <Stack
-              screenOptions={{
-                headerShown: false,
-              }}
-            />
-          </BadgeProvider>
-        </CartProvider>
-      </LanguageProvider>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                }}
+              />
+
+              <AppUpdateBanner />
+            </BadgeProvider>
+          </CartProvider>
+        </LanguageProvider>
+      </OneSignalBootstrap>
     </SafeAreaProvider>
   );
 }

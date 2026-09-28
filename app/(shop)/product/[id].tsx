@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Dimensions,
   Modal,
+  Animated,
 } from "react-native";
 import ImageViewer from "react-native-image-zoom-viewer";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -69,6 +70,8 @@ const [activeImageIndex, setActiveImageIndex] = useState(0);
 const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 const [imageViewerVisible, setImageViewerVisible] = useState(false);
 const [visualScanning, setVisualScanning] = useState(false);
+const [cartAddedVisible, setCartAddedVisible] = useState(false);
+const cartButtonScale = useRef(new Animated.Value(1)).current;
 const [visualSearchProgress, setVisualSearchProgress] = useState(0);
 const [visualSearchStage, setVisualSearchStage] = useState<
   'preparing' | 'analyzing' | 'searching' | 'finishing'
@@ -1344,17 +1347,12 @@ const getLocalizedColorName = (
     };
 
     dispatchAddToCart(optimizedProductPayload, 1, selectedSize, selectedColor);
-
-    // 🎯 THE ALERT FIX: Dynamic Macro Text Interpolation for Shopping Bag Feedback
-    const successTemplate =
-      t("addedToBagBody") ||
-      "{name} ({size} / {color}) has been added to your shopping bag.";
-    const formattedAlertMessage = successTemplate
-      .replace("{name}", product.name?.toUpperCase() || "")
-      .replace("{size}", selectedSize)
-      .replace("{color}", selectedColor.toUpperCase());
-
-    Alert.alert(t("addedToBag") || "Added to Bag", formattedAlertMessage);
+    setCartAddedVisible(true);
+    Animated.sequence([
+      Animated.spring(cartButtonScale, { toValue: 0.94, useNativeDriver: true }),
+      Animated.spring(cartButtonScale, { toValue: 1, friction: 4, useNativeDriver: true }),
+    ]).start();
+    setTimeout(() => setCartAddedVisible(false), 1600);
   };
 
 // ============================================================
@@ -1391,9 +1389,9 @@ const productImages = useMemo(() => {
     orderedImages.push(image);
   };
 
-  if (mainImage) {
-    addUniqueImage(mainImage);
-  }
+  // The original product image is always the first gallery image.
+  // Color selection adds its image after it instead of replacing it.
+  addUniqueImage(mainImage);
 
   const colorImages =
     product.colorImages &&
@@ -1431,7 +1429,6 @@ const productImages = useMemo(() => {
       const mappedImages = Array.isArray(colorImages[colorName])
         ? colorImages[colorName]
         : [];
-      mappedImages.forEach((image: any) => addUniqueImage(image));
       mappedImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
 
       const variant = variantEntries.find((entry: any) => {
@@ -1445,13 +1442,11 @@ const productImages = useMemo(() => {
         : typeof variant?.imageUrl === "string"
           ? [variant.imageUrl]
           : [];
-      variantImages.forEach((image: any) => addUniqueImage(image));
       variantImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
     }
 
-    const selectedImageSet = new Set(selectedImages.filter(Boolean).map((image) => image.toLowerCase()));
-    const selectedGallery = orderedImages.filter((image) => selectedImageSet.has(image.toLowerCase()));
-    if (selectedGallery.length > 0) return selectedGallery;
+    selectedImages.forEach((image) => addUniqueImage(image));
+    return orderedImages;
   }
 
   for (const colorName of colorNames) {
@@ -1503,6 +1498,13 @@ const productImages = useMemo(() => {
 
   return orderedImages;
 }, [product, selectedColor]);
+
+useEffect(() => {
+  setActiveImageIndex((currentIndex) => {
+    if (productImages.length === 0) return 0;
+    return Math.min(currentIndex, productImages.length - 1);
+  });
+}, [productImages]);
 
 
   const openImageViewer = useCallback((uri?: string | null) => {
@@ -2184,7 +2186,7 @@ const productImages = useMemo(() => {
                       isRTL && { textAlign: "right" },
                     ]}
                   >
-                    {(t("deliveryEstimate") || "DELIVERY: 3-5 WEEKS").toUpperCase()}
+                    {(t("deliveryEstimate") || "DELIVERY: 2-3 WEEKS").toUpperCase()}
                   </Text>
                   <Text
                     style={[
@@ -2328,22 +2330,36 @@ const productImages = useMemo(() => {
             </Text>
           </View>
 
+          <Animated.View
+            style={[styles.cartButtonWrap, { transform: [{ scale: cartButtonScale }] }]}
+          >
           <TouchableOpacity
-            style={[styles.callToBagBtn]}
+            style={[
+              styles.callToBagBtn,
+              cartAddedVisible && styles.callToBagBtnSuccess,
+            ]}
             onPress={() => addToCart()}
             activeOpacity={0.9}
+            accessibilityRole="button"
           >
-            <Ionicons
-              name="bag-handle"
-              size={18}
-              color="#FFFFFF"
-              style={isRTL ? { marginRight: 8 } : { marginRight: 8 }}
-            />
+            <View style={styles.callToBagIconWrap}>
+              <Ionicons
+                name={cartAddedVisible ? "checkmark" : "bag-handle-outline"}
+                size={17}
+                color="#111111"
+              />
+            </View>
 
             <Text style={styles.callToBagBtnText}>
-              {(t("addToBag") || "Add to Bag").toUpperCase()}
+              {cartAddedVisible
+                ? (t("addedToBag") || "Added").toUpperCase()
+                : (t("addToBag") || "Add to Bag").toUpperCase()}
             </Text>
+            {!cartAddedVisible && (
+              <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
+            )}
           </TouchableOpacity>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
       {/* ============================================================
@@ -4262,14 +4278,35 @@ standardColorFallbackText: {
     fontWeight: "800",
     letterSpacing: 0.8,
   },
-  callToBagBtn: {
+  cartButtonWrap: {
     flex: 1.2,
-    height: 48,
-    backgroundColor: "#111",
-    borderRadius: 12,
+    marginLeft: 12,
+  },
+  callToBagBtn: {
+    minHeight: 54,
+    paddingHorizontal: 14,
+    backgroundColor: "#111111",
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     flexDirection: "row",
+    shadowColor: "#111111",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  callToBagBtnSuccess: {
+    backgroundColor: "#2E7D32",
+  },
+  callToBagIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    marginRight: 9,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
   sizeMatrixHeader: {
     flexDirection: "row",
@@ -4344,9 +4381,11 @@ standardColorFallbackText: {
 
   callToBagBtnText: {
     color: "#FFF",
-    fontSize: 12,
+    flex: 1,
+    fontSize: 11,
     fontWeight: "900",
-    letterSpacing: 1.2,
+    letterSpacing: 0.9,
+    textAlign: "center",
   },
 
   floatingHeartBtn: {

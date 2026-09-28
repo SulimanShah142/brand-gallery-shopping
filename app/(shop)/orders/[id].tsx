@@ -918,9 +918,6 @@ const visibleItems = itemsExpanded
   <View
     style={[
       styles.orderTimelineOuter,
-      isRTL && {
-        direction: 'rtl',
-      },
     ]}
   >
     <ScrollView
@@ -948,9 +945,6 @@ const visibleItems = itemsExpanded
             key={stage.key}
             style={[
               styles.orderTimelineStage,
-              isRTL && {
-                direction: 'rtl',
-              },
             ]}
           >
             <Text style={styles.orderTimelineDate}>
@@ -1206,13 +1200,13 @@ const visibleItems = itemsExpanded
               </View>
               {(visibleItems as any[]).map((item: any, index: number) => {
                 const itemName = locale === 'ps'
-                  ? item.product?.namePs || item.namePs || item.product?.name || item.name
+                  ? item.product?.namePs || item.namePs || item.productNamePs || item.product?.name || item.productName || item.name
                   : locale === 'fa'
-                    ? item.product?.nameFa || item.nameFa || item.product?.name || item.name
-                    : item.product?.name || item.name;
+                    ? item.product?.nameFa || item.nameFa || item.productNameFa || item.product?.name || item.productName || item.name
+                    : item.product?.name || item.productName || item.name;
                 const itemPrice = Number(item.price || item.unitPrice || 0);
                 const itemQuantity = getEditedQuantity(item);
-                const imageUrl = item.product?.imageUrl || item.imageUrl;
+                const imageUrl = item.product?.imageUrl || item.imageUrl || item.productImage || item.product?.image;
 
                 return (
                   <View key={item.id || `${item.productId || index}`} style={[styles.orderItemRow, isRTL && { flexDirection: 'row-reverse' }]}>

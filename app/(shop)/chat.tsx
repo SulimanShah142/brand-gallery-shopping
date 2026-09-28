@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { 
   View, FlatList, TextInput, TouchableOpacity, Image, 
   Text, StyleSheet, Platform, ActivityIndicator, KeyboardAvoidingView, 
-  Alert, Keyboard, TouchableWithoutFeedback, Dimensions, SafeAreaView
+  Alert, Keyboard, TouchableWithoutFeedback, Dimensions, SafeAreaView, AppState
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,13 +11,13 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImageManipulator  from "expo-image-manipulator"
 import { 
   getOrCreateConversation, addLocalMessage, loadMessages, 
-  isOnline, syncMessagesForConversation 
 } from '../../lib/offline';
 import { uploadImage } from '../../lib/uploadthing';
 import { authClient } from '@/lib/auth-client';
 import { useLanguage } from '@/Contexts/LanguageContext';
 import {useBottomTabBarHeight} from "@react-navigation/bottom-tabs";
 import { API_URL } from '@/lib/config';
+import { OneSignal } from 'react-native-onesignal';
 
 const { width } = Dimensions.get('window');
 
@@ -53,11 +53,86 @@ const [cachedUser, setCachedUser] = useState<any>(null);      // Local profile m
 
   const refreshMessages = useCallback(async (convId: string) => {
     if (!convId) return;
-    const data = await loadMessages(convId);
-    setMessages(data || []);
+    const localMessages = await loadMessages(convId);
+    setMessages(localMessages || []);
     // Slight timeout allows layouer frame adjustments to process cleanly
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
   }, []);
+
+  const refreshFromServer = useCallback(async (convId: string) => {
+    if (!convId) return;
+
+      // Render the local conversation immediately, then refresh it from the server.
+      // This keeps the chat usable while the network request is in flight.
+      const cachedMessages = await loadMessages(convId).catch(() => []);
+      if (Array.isArray(cachedMessages)) {
+        setMessages(cachedMessages);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 0);
+      }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/conversations/${convId}/messages`,
+      );
+
+      if (!response.ok) return;
+
+      const serverMessages = await response.json();
+      if (!Array.isArray(serverMessages)) return;
+
+      for (const message of serverMessages) {
+        await addLocalMessage({
+          ...message,
+          isSyncedToServer: 1,
+        }).catch(() => {});
+      }
+
+      await refreshMessages(convId);
+    } catch (error) {
+      console.warn('Chat server refresh failed:', error);
+    }
+  }, [refreshMessages]);
+
+  useEffect(() => {
+    if (!activeConvId) return;
+
+    const refreshForNotification = (event: any) => {
+      const notification = event?.getNotification?.();
+      const data = notification?.additionalData || {};
+      const notificationConversationId = data?.conversationId;
+
+      if (
+        notificationConversationId &&
+        String(notificationConversationId) !== String(activeConvId)
+      ) {
+        return;
+      }
+
+      void refreshFromServer(activeConvId);
+    };
+
+    OneSignal.Notifications.addEventListener(
+      'foregroundWillDisplay',
+      refreshForNotification,
+    );
+
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (nextState) => {
+        if (nextState === 'active') {
+          void refreshFromServer(activeConvId);
+        }
+      },
+    );
+
+    return () => {
+      OneSignal.Notifications.removeEventListener(
+        'foregroundWillDisplay',
+        refreshForNotification,
+      );
+      appStateSubscription.remove();
+    };
+  }, [activeConvId, refreshFromServer]);
 
    // 🎯 THE CUSTOM AUTHENTICATION FRONTEND INITIALIZER FIX:
   // Reads your true custom authenticated profile details straight out of SecureStore!
@@ -93,14 +168,10 @@ useEffect(() => {
 
       setActiveUserId(userId);
 
-      let convId: string | null = null;
-
-      if (params.conversationId) {
-        convId = params.conversationId as string;
-      } else {
-        const conv = await getOrCreateConversation(userId);
-        convId = (conv as any)?.id || null;
-      }
+      // Route parameters can be stale after logout/login. Resolve the canonical
+      // server-backed room for the authenticated account every time.
+      const conv = await getOrCreateConversation(userId);
+      const convId: string | null = (conv as any)?.id || null;
 
       if (cancelled) return;
 
@@ -143,36 +214,9 @@ useEffect(() => {
     try {
       setHistoryLoading(true);
 
-      await refreshMessages(activeConvId);
+      await refreshFromServer(activeConvId);
 
       if (!alive) return;
-
-      const online = await isOnline().catch(() => false);
-
-      if (online && activeConvId) {
-        try {
-          const res = await fetch(
-            `${API_URL}/api/conversations/${activeConvId}/messages`
-          );
-
-          if (res.ok) {
-            const data = await res.json();
-
-            if (Array.isArray(data)) {
-              for (const msg of data) {
-                await addLocalMessage({
-                  ...msg,
-                  isSyncedToServer: 1,
-                }).catch(() => {});
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("sync failed:", e);
-        }
-      }
-
-      await refreshMessages(activeConvId);
     } catch (e) {
       console.error("history load error:", e);
     } finally {
@@ -184,7 +228,7 @@ useEffect(() => {
 
   const interval = setInterval(() => {
     if (alive && activeConvId) {
-      refreshMessages(activeConvId);
+      void refreshFromServer(activeConvId);
     }
   }, 5000);
 
@@ -192,7 +236,7 @@ useEffect(() => {
     alive = false;
     clearInterval(interval);
   };
-}, [activeConvId]);
+}, [activeConvId, refreshFromServer]);
    // 🎯 THE COMPLIANT DISPATCH CONTEXT LAYER
   // ==========================================
   // 🎯 THE DISAPPEARING MESSAGE CURE (SYNCHRONIZED DISPATCH)

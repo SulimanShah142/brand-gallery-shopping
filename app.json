@@ -28,6 +28,10 @@
         "foregroundImage": "./assets/images/app-icon.jpeg",
         "backgroundColor": "#FFFFFF"
       },
+      "notification": {
+        "icon": "./assets/ic_stat_onesignal_default.png",
+        "color": "#000000"
+      },
       "softwareKeyboardLayoutMode": "resize",
       "googleServicesFile": "./google-services.json",
       "permissions": [
@@ -68,8 +72,8 @@
       [
         "react-native-fbsdk-next",
         {
-          "appID": "1080614298010140",
-          "clientToken": "a2f84e7ad71aa724ebba2fb932df30e0",
+          "appID": "1626553048908896",
+          "clientToken": "e6721d94108a7ff29c409ad386c6b86a",
           "displayName": "Brand Gallery Shopping",
           "advertiserIDCollectionEnabled": true,
           "autoLogAppEventsEnabled": true
@@ -99,11 +103,11 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-image.jpg",
+          "image": "./assets/images/splash.png",
           "resizeMode": "cover",
           "backgroundColor": "#ffffff",
           "dark": {
-            "image": "./assets/images/splash-image.jpg",
+            "image": "./assets/images/splash.png",
             "backgroundColor": "#000000"
           }
         }
@@ -115,7 +119,9 @@
       [
         "onesignal-expo-plugin",
         {
-          "mode": "production"
+          "mode": "production",
+          "smallIcons": ["./assets/ic_stat_onesignal_default.png"],
+          "smallIconAccentColor": "#000000"
         }
       ]
     ],
