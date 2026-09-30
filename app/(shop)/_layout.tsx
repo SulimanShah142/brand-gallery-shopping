@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform, InteractionManager } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +10,8 @@ import { useBadges } from '@/Contexts/BadgeContext';
 import { useAuthGuard } from '@/lib/useAuthGuard';
 import { HomeTabProvider, useHomeTab } from '@/Contexts/HomeTabContext';
 import { VisualSearchProvider } from '@/Contexts/VisualSearchContext';
+import { initOfflineDb } from '@/lib/offline';
+import { preloadVisualEmbeddingModel } from '@/lib/visualEmbedding';
 
 
 export default function ShopLayout() {
@@ -23,6 +25,8 @@ export default function ShopLayout() {
 }
 
 function ShopLayoutContent() {
+  const [appIsReady, setAppIsReady] = useState(false);
+  const [isBootComplete, setIsBootComplete] = useState(false);
   const { t, isRTL, locale } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -30,6 +34,36 @@ function ShopLayoutContent() {
   const { userChatBadge } = useBadges();
 
   const { handleHomeTabPress } = useHomeTab();
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function prepareShopSystem() {
+      try {
+        await initOfflineDb().catch(() => {});
+        InteractionManager.runAfterInteractions(() => {
+          preloadVisualEmbeddingModel().catch((error) => {
+            console.warn('Shop visual model preload failed:', error);
+          });
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      } catch (error) {
+        console.warn('Shop app bootstrap skipped an init error:', error);
+      } finally {
+        if (!mounted) return;
+        setIsBootComplete(true);
+        setTimeout(() => {
+          if (mounted) setAppIsReady(true);
+        }, 300);
+      }
+    }
+
+    void prepareShopSystem();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const cartCount = useMemo(() => {
     const items = cartState?.items || [];
@@ -75,7 +109,7 @@ function ShopLayoutContent() {
           ]}
         >
           <Image
-            source={require('@/assets/images/app-icon.jpeg')}
+            source={require('@/assets/images/splash.png')}
             style={styles.headerLogoImage}
             resizeMode="contain"
           />
@@ -128,6 +162,22 @@ function ShopLayoutContent() {
       </View>
     );
   };
+
+  if (!appIsReady || !isBootComplete) {
+    return (
+      <View style={styles.splashContainer}>
+        <Image
+          source={require('@/assets/images/splash.png')}
+          style={styles.splashImage}
+          resizeMode="contain"
+        />
+        <View style={styles.splashFooter}>
+          <ActivityIndicator size="small" color="#000000" />
+          <Text style={styles.splashSubtitle}>INITIALIZING CORE DATA SYSTEMS...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -338,6 +388,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   splashContainer: { flex: 1, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
   splashImage: { width: '70%', height: '35%' },
+  splashFooter: { position: 'absolute', bottom: 60, alignItems: 'center', gap: 12 },
   splashSubtitle: { fontSize: 10, fontWeight: '800', color: '#666666', letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 14 },
   globalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
   brandCluster: { flexDirection: 'row', alignItems: 'center', gap: 10 },
