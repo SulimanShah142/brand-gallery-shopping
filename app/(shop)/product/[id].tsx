@@ -1205,15 +1205,36 @@ const getLocalizedColorName = (
   const finalDisplayPrice = useMemo(() => {
     if (!product) return 0;
 
+    const sizeRows = [
+      ...(Array.isArray(product?.sizeGuide?.rows)
+        ? product.sizeGuide.rows
+        : []),
+      ...(Array.isArray(product?.specificationTables)
+        ? product.specificationTables.flatMap((table: any) =>
+            Array.isArray(table?.rows) ? table.rows : []
+          )
+        : []),
+    ];
+    const selectedSizePrice = sizeRows.find(
+      (row: any) =>
+        String(row?.size || '').trim().toLowerCase() ===
+          String(selectedSize || '').trim().toLowerCase() &&
+        row?.usdPrice != null &&
+        String(row.usdPrice).trim() !== ''
+    )?.usdPrice;
+    const selectedColorPrice = getColorVariant(selectedColor)?.usdPrice;
+    const selectedUsdPrice =
+      selectedSizePrice ?? selectedColorPrice ?? product.usdPrice;
+
     const rate = parseFloat(settings?.usdToAfnRate || "65");
     const profit = parseFloat(String(product?.profitPercentage ?? "20").replace(/[^0-9.]/g, "")) || 20;
 
     const baseCurrent =
-      parseFloat(product.usdPrice || "0") * rate * (1 + profit / 100);
+      parseFloat(String(selectedUsdPrice || "0")) * rate * (1 + profit / 100);
     const finalRoundedUpCeilingPrice = Math.ceil(baseCurrent / 10) * 10;
 
     return Math.max(0, finalRoundedUpCeilingPrice);
-  }, [product, settings]); // match Home dependencies (no per-user promo applied here)
+  }, [getColorVariant, product, selectedColor, selectedSize, settings]); // match Home dependencies (no per-user promo applied here)
 
   // 3. Media Upload & Review Handlers
   const handlePickAndUploadImage = async () => {
