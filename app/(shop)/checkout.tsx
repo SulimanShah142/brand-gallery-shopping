@@ -12,6 +12,7 @@ import * as SecureStore from "expo-secure-store"
 
 
 import { API_URL } from '@/lib/config';
+import ProductImageViewer from '@/components/ProductImageViewer';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -34,6 +35,7 @@ export default function CheckoutScreen() {
 
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<any>(null);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
 const [form, setForm] = useState({
   name: '',
@@ -1489,19 +1491,24 @@ return (
   };
 
   const itemTotalCalculatedPrice = Math.ceil(parseFloat(item.price || '0') * (item.quantity || 1));
+  const colorImages = productRef?.colorImageUrls?.[item.selectedColor] || productRef?.colorImages?.[item.selectedColor];
+  const checkoutImageUri = (Array.isArray(colorImages) ? colorImages[0] : colorImages) || item.imageUrl || productRef.imageUrl;
 
   return (
     <View key={`checkout-slat-${item.id}-${idx}`} style={[styles.manifestItemRowLine, isRTL && { flexDirection: 'row-reverse' }]}>
-      <Image
-        source={{
-          uri: (() => {
-            const colorImages = productRef?.colorImageUrls?.[item.selectedColor] || productRef?.colorImages?.[item.selectedColor];
-            return (Array.isArray(colorImages) ? colorImages[0] : colorImages) || item.imageUrl || productRef.imageUrl;
-          })(),
-        }}
-        style={styles.manifestItemImageThumb}
-        resizeMode="contain"
-      />
+      <TouchableOpacity
+        onPress={() => checkoutImageUri && setSelectedImageUri(checkoutImageUri)}
+        disabled={!checkoutImageUri}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${checkoutDisplayTitle || 'product'} image`}
+      >
+        <Image
+          source={{ uri: checkoutImageUri }}
+          style={styles.manifestItemImageThumb}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
       
       <View style={[styles.manifestItemDetailsCell, isRTL ? { alignItems: 'flex-end', paddingRight: 12 } : { alignItems: 'flex-start', paddingLeft: 12 }]}>
         <Text style={[styles.manifestItemNameText, isRTL ? { textAlign: 'right' } : { textAlign: 'left' }]} numberOfLines={1}>
@@ -2712,6 +2719,12 @@ return (
 
 
     </KeyboardAvoidingView>
+
+    <ProductImageViewer
+      visible={Boolean(selectedImageUri)}
+      imageUri={selectedImageUri}
+      onClose={() => setSelectedImageUri(null)}
+    />
 
     {/* 🎯 APPMARKET COMPLIANT TRANSPARENT SYSTEM RATIONALE OVERLAY MODAL */}
 </View>

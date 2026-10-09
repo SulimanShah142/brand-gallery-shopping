@@ -9,11 +9,13 @@ import { useCart } from '@/Contexts/CartContext';
 import { useBadges } from '@/Contexts/BadgeContext';
 import { API_URL } from '@/lib/config';
 import { authClient } from '@/lib/auth-client';
+import ProductImageViewer from '@/components/ProductImageViewer';
 
 export default function CartScreen() {
   const router = useRouter();
   const { t, isRTL, locale } = useLanguage();
   const { state: cartState, removeFromCart, addToCart } = useCart();
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
   // 🎯 REAL-TIME LIVE DATA HYDRATION LAYER CELLS:
   // Holds full live, multi-lingual translations fetched directly from your Cloud Worker!
@@ -945,15 +947,23 @@ const renderCartItem = ({
       {/* PRODUCT IMAGE                                         */}
       {/* ==================================================== */}
 
-      <Image
-        source={{
-          uri: imageUri,
-        }}
-        style={
-          styles.cartItemImage
-        }
-        resizeMode="cover"
-      />
+      <TouchableOpacity
+        onPress={() => imageUri && setSelectedImageUri(imageUri)}
+        disabled={!imageUri}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${cartProductDisplayTitle || 'product'} image`}
+      >
+        <Image
+          source={{
+            uri: imageUri,
+          }}
+          style={
+            styles.cartItemImage
+          }
+          resizeMode="cover"
+        />
+      </TouchableOpacity>
 
       {/* ==================================================== */}
       {/* PRODUCT INFORMATION                                   */}
@@ -1562,6 +1572,11 @@ const renderCartItem = ({
           </View>
         )}
       </View>
+      <ProductImageViewer
+        visible={Boolean(selectedImageUri)}
+        imageUri={selectedImageUri}
+        onClose={() => setSelectedImageUri(null)}
+      />
     </SafeAreaView>
   );
 }
