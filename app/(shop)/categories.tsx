@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Dimensions, ActivityIndicator, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -201,6 +202,12 @@ export default function CategoriesPage() {
       setLoading(false);
     }
   }, [selectedParentId]); // Recalibrates safely on selection state changes
+
+  useFocusEffect(
+    useCallback(() => {
+      setProducts((currentProducts) => shuffleArray(currentProducts));
+    }, [])
+  );
 
   // 🎯 ONE-TIME BOOT SEEDING GUARD: 
   // Stripping loose dependency parameters completely stops background query loops 

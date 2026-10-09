@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, Image, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, Image, TextInput, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '@/Contexts/LanguageContext';
 import { useCart } from '@/Contexts/CartContext';
@@ -189,9 +190,19 @@ export default function ProductsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadProducts(false);
-    setRefreshing(false);
+    try {
+      await fetchAndSyncProducts(50, 1);
+      await loadProducts(false);
+    } finally {
+      setRefreshing(false);
+    }
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      setProducts((currentProducts) => shuffleArray(currentProducts));
+    }, [])
+  );
 
 
   const getDisplayPrice = (usdPrice: string, productProfitPercentage?: string | number | null) => {
@@ -357,6 +368,9 @@ const addToCart = (product: any) => {
         windowSize={5}
         columnWrapperStyle={[styles.gridRow, isRTL && { flexDirection: 'row-reverse' }]}
         ListHeaderComponent={headerComponent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
         ListEmptyComponent={
           remoteSyncing ? (
             <View style={styles.loadingContainer}>

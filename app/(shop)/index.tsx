@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   ScrollView, TouchableOpacity, Text, StyleSheet, View,
   Dimensions, RefreshControl, TextInput, ActivityIndicator,
@@ -369,7 +370,7 @@ const loadMoreProducts = useCallback(async () => {
 
         if (isMounted.current) {
           if (firstProducts.length > 0) {
-            setProducts(firstProducts);
+            setProducts(shuffleArray(firstProducts));
             setProductPage(1);
             setDisplayLimit(20);
             setHasMoreProducts(firstProducts.length === 20);
@@ -436,6 +437,12 @@ useEffect(() => {
 useEffect(() => {
   handleLoadData(true);
 }, []);
+
+useFocusEffect(
+  useCallback(() => {
+    setProducts((currentProducts) => shuffleArray(currentProducts));
+  }, [])
+);
 
 useEffect(() => {
   const preloadTask = InteractionManager.runAfterInteractions(() => {

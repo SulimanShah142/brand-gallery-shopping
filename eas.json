@@ -20,11 +20,11 @@
       }
     },
     "production": {
-      "distribution": "store",
+      "distribution": "internal",
       "autoIncrement": true,
       "channel": "production",
       "android": {
-        "buildType": "app-bundle",
+        "buildType": "apk",
         "credentialsSource": "remote"
       }
     }
