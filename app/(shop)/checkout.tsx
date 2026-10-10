@@ -12,7 +12,6 @@ import * as SecureStore from "expo-secure-store"
 
 
 import { API_URL } from '@/lib/config';
-import ProductImageViewer from '@/components/ProductImageViewer';
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -35,7 +34,6 @@ export default function CheckoutScreen() {
 
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<any>(null);
-  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
 const [form, setForm] = useState({
   name: '',
@@ -1497,11 +1495,11 @@ return (
   return (
     <View key={`checkout-slat-${item.id}-${idx}`} style={[styles.manifestItemRowLine, isRTL && { flexDirection: 'row-reverse' }]}>
       <TouchableOpacity
-        onPress={() => checkoutImageUri && setSelectedImageUri(checkoutImageUri)}
-        disabled={!checkoutImageUri}
+        onPress={() => router.push({ pathname: '/product/[id]', params: { id: String(productRef?.id || item.id) } })}
+        disabled={!productRef?.id && !item?.id}
         activeOpacity={0.85}
         accessibilityRole="button"
-        accessibilityLabel={`View ${checkoutDisplayTitle || 'product'} image`}
+        accessibilityLabel={`View details for ${checkoutDisplayTitle || 'product'}`}
       >
         <Image
           source={{ uri: checkoutImageUri }}
@@ -2719,12 +2717,6 @@ return (
 
 
     </KeyboardAvoidingView>
-
-    <ProductImageViewer
-      visible={Boolean(selectedImageUri)}
-      imageUri={selectedImageUri}
-      onClose={() => setSelectedImageUri(null)}
-    />
 
     {/* 🎯 APPMARKET COMPLIANT TRANSPARENT SYSTEM RATIONALE OVERLAY MODAL */}
 </View>
