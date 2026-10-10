@@ -834,28 +834,7 @@ const visibleItems = itemsExpanded
                 #{String(order.id || '').slice(0, 8).toUpperCase()}
               </Text>
             </View>
-            <TouchableOpacity
-              onPress={openOrderChat}
-              disabled={openingChat}
-              accessibilityRole="button"
-              accessibilityLabel={t('chatWithAdmin') || 'Chat with support about this order'}
-              style={{
-                minWidth: 76,
-                height: 40,
-                paddingHorizontal: 10,
-                borderRadius: 8,
-                backgroundColor: '#111111',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: openingChat ? 0.65 : 1,
-              }}
-            >
-              {openingChat ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="chatbubble-ellipses-outline" size={16} color="#FFFFFF" />}
-              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800', marginLeft: 5 }}>
-                {openingChat ? '...' : 'CHAT'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.orderHeaderStatusDot} />
           </View>
 
           {/* MAP HEADER HOST AREA */}
@@ -886,6 +865,30 @@ const visibleItems = itemsExpanded
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >
+
+            <TouchableOpacity
+              onPress={openOrderChat}
+              disabled={openingChat}
+              accessibilityRole="button"
+              accessibilityLabel={t('chatWithAdmin') || 'Chat with support about this order'}
+              style={{
+                minHeight: 52,
+                width: '100%',
+                marginBottom: 18,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: '#111111',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: openingChat ? 0.65 : 1,
+              }}
+            >
+              {openingChat ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="chatbubble-ellipses-outline" size={19} color="#FFFFFF" />}
+              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800', marginLeft: 9 }}>
+                {openingChat ? (t('openingChat') || 'OPENING CHAT...') : (t('chatWithAdmin') || 'CHAT WITH SUPPORT ABOUT THIS ORDER')}
+              </Text>
+            </TouchableOpacity>
 
            
     {/* ========================================================== */}
