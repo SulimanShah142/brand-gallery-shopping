@@ -26,6 +26,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const { t, isRTL } = useLanguage();
+  const tabBarHeight = useBottomTabBarHeight();
   const { data: authData, isPending: sessionLoading } = authClient.useSession();
 
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -174,10 +175,13 @@ useEffect(() => {
 
       setActiveUserId(userId);
 
-      // Route parameters can be stale after logout/login. Resolve the canonical
-      // server-backed room for the authenticated account every time.
-      const conv = await getOrCreateConversation(userId);
-      const convId: string | null = (conv as any)?.id || null;
+      // An order entry point supplies the server-resolved customer conversation.
+      // Prefer it so order context opens in the same thread on both sides.
+      const requestedConversationId = String(params.conversationId || '').trim();
+      const conv = requestedConversationId
+        ? null
+        : await getOrCreateConversation(userId);
+      const convId: string | null = requestedConversationId || (conv as any)?.id || null;
 
       if (cancelled) return;
 
@@ -487,13 +491,6 @@ const handlePickAndUploadImage = async () => {
 
   const [keyboardPadding, setKeyboardPadding] = useState(0);
   
-  let tabBarHeight = 0;
-  try {
-    tabBarHeight = useBottomTabBarHeight();
-  } catch (e) {
-    tabBarHeight = 0; 
-  }
-
   useEffect(() => {
     const showListener = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', 

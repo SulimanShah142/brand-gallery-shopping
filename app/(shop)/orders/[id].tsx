@@ -260,7 +260,7 @@ const openOrderChat = async () => {
     const conversation = await getOrCreateConversation(String(userId));
     const firstItem = order?.items?.[0];
     router.push({
-      pathname: '/chat',
+      pathname: '/(shop)/chat',
       params: {
         orderId: String(order?.id || safeOrderId),
         orderItemName: String(firstItem?.product?.name || firstItem?.productName || firstItem?.name || ''),
@@ -834,7 +834,28 @@ const visibleItems = itemsExpanded
                 #{String(order.id || '').slice(0, 8).toUpperCase()}
               </Text>
             </View>
-            <View style={styles.orderHeaderStatusDot} />
+            <TouchableOpacity
+              onPress={openOrderChat}
+              disabled={openingChat}
+              accessibilityRole="button"
+              accessibilityLabel={t('chatWithAdmin') || 'Chat with support about this order'}
+              style={{
+                minWidth: 76,
+                height: 40,
+                paddingHorizontal: 10,
+                borderRadius: 8,
+                backgroundColor: '#111111',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: openingChat ? 0.65 : 1,
+              }}
+            >
+              {openingChat ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="chatbubble-ellipses-outline" size={16} color="#FFFFFF" />}
+              <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800', marginLeft: 5 }}>
+                {openingChat ? '...' : 'CHAT'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* MAP HEADER HOST AREA */}
@@ -857,26 +878,6 @@ const visibleItems = itemsExpanded
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryAddress') || 'Delivery address'}: {order.address || '-'}</Text>
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('estimatedArrival') || 'Estimated arrival'}: {estimatedArrival}</Text>
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryWindow') || 'Delivery usually takes 14 to 21 days.'}</Text>
-            <TouchableOpacity
-              disabled={openingChat}
-              onPress={openOrderChat}
-              style={{
-                marginTop: 14,
-                backgroundColor: '#111111',
-                borderRadius: 10,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'row',
-                opacity: openingChat ? 0.65 : 1,
-              }}
-            >
-              {openingChat ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />}
-              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800', marginLeft: 8 }}>
-                {openingChat ? (t('openingChat') || 'OPENING CHAT...') : (t('chatWithAdmin') || 'CHAT WITH SUPPORT')}
-              </Text>
-            </TouchableOpacity>
           </View>
 
           {/* DETAILS SHEET */}
