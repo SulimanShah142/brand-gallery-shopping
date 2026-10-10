@@ -7,6 +7,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImageManipulator  from "expo-image-manipulator"
 import { 
@@ -50,6 +51,11 @@ const [refreshing, setRefreshing] = useState(false);        // Pull-to-refresh t
 const [cachedUser, setCachedUser] = useState<any>(null);      // Local profile matching indices payload
 
   const flatListRef = useRef<FlatList>(null);
+  const orderContextSentRef = useRef<string | null>(null);
+
+  const orderIdParam = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
+  const orderItemNameParam = Array.isArray(params.orderItemName) ? params.orderItemName[0] : params.orderItemName;
+  const orderImageUrlParam = Array.isArray(params.orderImageUrl) ? params.orderImageUrl[0] : params.orderImageUrl;
 
   const refreshMessages = useCallback(async (convId: string) => {
     if (!convId) return;
@@ -192,6 +198,63 @@ useEffect(() => {
     cancelled = true;
   };
 }, [sessionLoading, authData?.user?.id, params.userId, params.conversationId]);
+
+useEffect(() => {
+  const orderId = String(orderIdParam || '').trim();
+  if (!activeConvId || !activeUserId || !orderId) return;
+
+  const contextKey = `${activeConvId}:${orderId}`;
+  if (orderContextSentRef.current === contextKey) return;
+  orderContextSentRef.current = contextKey;
+
+  const ensureOrderReference = async () => {
+    try {
+      const existingResponse = await fetch(`${API_URL}/api/conversations/${activeConvId}/messages`);
+      const existingMessages = existingResponse.ok ? await existingResponse.json() : [];
+      const marker = `Order reference: ${orderId}`;
+      if (Array.isArray(existingMessages) && existingMessages.some((message: any) => String(message.content || '').includes(marker))) return;
+
+      const content = `${marker}${orderItemNameParam ? `\nItem: ${orderItemNameParam}` : ''}`;
+      const createdAt = new Date().toISOString();
+      const messageId = Crypto.randomUUID();
+      const token = await SecureStore.getItemAsync('custom_user_session_token').catch(() => '');
+      const response = await fetch(`${API_URL}/api/conversations/${activeConvId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${String(token || '').trim()}`,
+        },
+        body: JSON.stringify({
+          id: messageId,
+          conversationId: activeConvId,
+          senderId: activeUserId,
+          content,
+          attachmentUrl: String(orderImageUrlParam || '').trim() || null,
+          createdAt,
+        }),
+      });
+      if (!response.ok) throw new Error('Order reference message was rejected');
+
+      await addLocalMessage({
+        id: messageId,
+        conversationId: activeConvId,
+        senderId: activeUserId,
+        content,
+        attachmentUrl: String(orderImageUrlParam || '').trim() || null,
+        isRead: 1,
+        isSyncedToServer: 1,
+        createdAt,
+      }).catch(() => {});
+      await refreshFromServer(activeConvId);
+    } catch (error) {
+      orderContextSentRef.current = null;
+      console.warn('Could not add order reference to chat:', error);
+    }
+  };
+
+  void ensureOrderReference();
+}, [activeConvId, activeUserId, orderIdParam, orderImageUrlParam, orderItemNameParam, refreshFromServer]);
+
 useEffect(() => {
   const userId = authData?.user?.id;
 
@@ -548,6 +611,21 @@ const handlePickAndUploadImage = async () => {
         </View>
         <View style={styles.headerActionSlot} />
       </View>
+
+      {!!orderIdParam && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#F5F5F5', borderBottomWidth: 1, borderBottomColor: '#E8E8E8' }}>
+          {orderImageUrlParam ? (
+            <Image source={{ uri: String(orderImageUrlParam) }} style={{ width: 42, height: 42, borderRadius: 4, backgroundColor: '#E5E5E5' }} />
+          ) : (
+            <Ionicons name="cube-outline" size={28} color="#555" />
+          )}
+          <View style={{ marginLeft: 10, flex: 1 }}>
+            <Text style={{ color: '#666', fontSize: 10, fontWeight: '700' }}>ORDER REFERENCE</Text>
+            <Text style={{ color: '#111', fontSize: 12, fontWeight: '800' }} numberOfLines={1}>#{String(orderIdParam)}</Text>
+            {!!orderItemNameParam && <Text style={{ color: '#666', fontSize: 11 }} numberOfLines={1}>{String(orderItemNameParam)}</Text>}
+          </View>
+        </View>
+      )}
 
       {/* Sign-in warning banner for offline/local chat */}
       {!authData?.user && (

@@ -8,6 +8,7 @@ import UnifiedMap from '@/components/UnifiedMap';
 import { API_URL } from '@/lib/config';
 import { authClient } from '@/lib/auth-client';
 import * as SecureStore from 'expo-secure-store';
+import { getOrCreateConversation } from '@/lib/offline';
 
 
 export const STATUS_CANONICAL_MAP: Record<string, string> = {
@@ -212,6 +213,7 @@ const [saveSubmitting, setSaveSubmitting] = useState(false);
 const [quantityEdits, setQuantityEdits] = useState<Record<string, number>>({});
 const [Orders, setOrders] = useState(null);
 const [storedToken, setStoredToken] = useState<string | null>(null);
+const [openingChat, setOpeningChat] = useState(false);
 const { data: session } = authClient.useSession();
 
 const safeOrderId = Array.isArray(id) ? id[0] : String(id || '');
@@ -245,6 +247,33 @@ const getUserId = useCallback(async () => {
 
   return null;
 }, [session?.user?.id]);
+
+const openOrderChat = async () => {
+  const userId = await getUserId();
+  if (!userId) {
+    Alert.alert(t('signInRequired') || 'Sign in required', 'Sign in to message the admin about this order.');
+    return;
+  }
+
+  setOpeningChat(true);
+  try {
+    const conversation = await getOrCreateConversation(String(userId));
+    const firstItem = order?.items?.[0];
+    router.push({
+      pathname: '/chat',
+      params: {
+        orderId: String(order?.id || safeOrderId),
+        orderItemName: String(firstItem?.product?.name || firstItem?.productName || firstItem?.name || ''),
+        orderImageUrl: String(firstItem?.product?.imageUrl || firstItem?.imageUrl || firstItem?.productImage || ''),
+        conversationId: String((conversation as any)?.id || ''),
+      },
+    });
+  } catch (error) {
+    Alert.alert('Chat unavailable', error instanceof Error ? error.message : 'Could not open support chat');
+  } finally {
+    setOpeningChat(false);
+  }
+};
 
 const fetchOrders = useCallback(async () => {
   const userId = await getUserId();
@@ -828,6 +857,26 @@ const visibleItems = itemsExpanded
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryAddress') || 'Delivery address'}: {order.address || '-'}</Text>
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('estimatedArrival') || 'Estimated arrival'}: {estimatedArrival}</Text>
             <Text style={[styles.deliveryInfoText, isRTL && { textAlign: 'right' }]}>{t('deliveryWindow') || 'Delivery usually takes 14 to 21 days.'}</Text>
+            <TouchableOpacity
+              disabled={openingChat}
+              onPress={openOrderChat}
+              style={{
+                marginTop: 14,
+                backgroundColor: '#111111',
+                borderRadius: 10,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'row',
+                opacity: openingChat ? 0.65 : 1,
+              }}
+            >
+              {openingChat ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />}
+              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800', marginLeft: 8 }}>
+                {openingChat ? (t('openingChat') || 'OPENING CHAT...') : (t('chatWithAdmin') || 'CHAT WITH SUPPORT')}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* DETAILS SHEET */}
