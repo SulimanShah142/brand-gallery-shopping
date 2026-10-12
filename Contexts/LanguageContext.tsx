@@ -66,7 +66,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     try {
       // 1. Save to storage
       await SecureStore.setItemAsync(STORAGE_KEY, nextLocale);
-      await syncLanguagePreference(nextLocale);
+      void syncLanguagePreference(nextLocale);
       
       // 2. Check if the direction (RTL/LTR) actually needs to change
       const currentRTL = I18nManager.isRTL;

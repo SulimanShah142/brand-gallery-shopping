@@ -5,7 +5,7 @@ import { InteractionManager, Linking } from 'react-native';
 import { Settings, AppLink } from 'react-native-fbsdk-next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { LanguageProvider } from '@/Contexts/LanguageContext';
+import { LanguageProvider, syncLanguagePreference } from '@/Contexts/LanguageContext';
 import { CartProvider } from '@/Contexts/CartContext';
 import { BadgeProvider } from '@/Contexts/BadgeContext';
 import { initOneSignal } from '@/lib/notiifcations';
@@ -29,6 +29,9 @@ function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
         unsubscribe = authClient.subscribe((session) => {
           const userId = session?.user?.id;
           if (userId) {
+            void syncLanguagePreference().catch((error) => {
+              console.warn('User language preference sync failed:', error);
+            });
             void initOneSignal(String(userId)).catch((error) => {
               console.warn('OneSignal user linking failed:', error);
             });
