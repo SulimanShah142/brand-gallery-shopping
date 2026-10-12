@@ -3,8 +3,35 @@ import { I18nManager } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates'; // Required to restart app on flip
 import { LANGUAGES, Locale, isRTL, translate } from '@/lib/i18n';
+import { API_URL } from '@/lib/config';
 
 const STORAGE_KEY = 'user-interface-language';
+
+export async function syncLanguagePreference(locale?: Locale) {
+  try {
+    const [token, storedLocale] = await Promise.all([
+      SecureStore.getItemAsync('custom_user_session_token'),
+      locale ? Promise.resolve(locale) : SecureStore.getItemAsync(STORAGE_KEY),
+    ]);
+    const selectedLocale = locale || storedLocale;
+    if (!token || !['en', 'fa', 'ps'].includes(String(selectedLocale))) return;
+
+    const response = await fetch(`${API_URL}/api/user/update-profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.trim()}`,
+      },
+      body: JSON.stringify({ preferredLanguage: selectedLocale }),
+    });
+
+    if (!response.ok) {
+      console.warn('Unable to sync selected language to account:', response.status);
+    }
+  } catch (error) {
+    console.warn('Unable to sync selected language to account:', error);
+  }
+}
 
 type LanguageContextValue = {
   locale: Locale;
@@ -26,6 +53,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         const stored = await SecureStore.getItemAsync(STORAGE_KEY);
         if (stored && (stored === 'fa' || stored === 'ps' || stored === 'en')) {
           setLocaleState(stored as Locale);
+          await syncLanguagePreference(stored as Locale);
         }
       } catch (error) {
         console.warn('Unable to load language', error);
@@ -38,6 +66,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     try {
       // 1. Save to storage
       await SecureStore.setItemAsync(STORAGE_KEY, nextLocale);
+      await syncLanguagePreference(nextLocale);
       
       // 2. Check if the direction (RTL/LTR) actually needs to change
       const currentRTL = I18nManager.isRTL;

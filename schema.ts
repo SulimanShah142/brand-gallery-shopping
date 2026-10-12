@@ -63,6 +63,10 @@ export const user = pgTable(
       .notNull()
       .default("customer"),
 
+    preferredLanguage: text("preferred_language")
+      .notNull()
+      .default("en"),
+
     onesignalPlayerId: text(
       "onesignal_player_id"
     ),
