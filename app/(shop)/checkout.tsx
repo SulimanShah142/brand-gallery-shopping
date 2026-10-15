@@ -484,11 +484,11 @@ const totals = useMemo(() => {
           subtotal
         );
     } else {
+      const giftLabel = String(
+        settings?.rewardValue ?? ''
+      ).trim();
       earnedGift =
-        String(
-          settings?.rewardValue ??
-          'FREE GIFT'
-        );
+        giftLabel || 'FREE GIFT';
     }
   }
 
@@ -2213,6 +2213,25 @@ return (
           </View>
         )}
 
+        {totals.gift && (
+          <View
+            style={[
+              styles.giftCelebrationBadge,
+              isRTL && {
+                flexDirection: 'row-reverse',
+              },
+            ]}
+          >
+            <Ionicons
+              name="gift-outline"
+              size={18}
+              color="#15803D"
+            />
+            <Text style={styles.giftCelebrationText}>
+              {(t('giftTitle') || 'MILESTONE GIFT UNLOCKED')}: {totals.gift}
+            </Text>
+          </View>
+        )}
 
         {/* DELIVERY */}
 

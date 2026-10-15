@@ -87,7 +87,7 @@ export const user = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table: any) => ({
+  (table) => ({
     emailIdx: uniqueIndex(
       "user_email_idx"
     ).on(table.email),
@@ -131,7 +131,7 @@ export const session = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table: any) => ({
+  (table) => ({
     tokenIdx: uniqueIndex(
       "session_token_idx"
     ).on(table.token),
@@ -168,7 +168,7 @@ export const verification = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table: any) => ({
+  (table) => ({
     identifierIdx: index(
       "verification_identifier_idx"
     ).on(table.identifier),
@@ -495,7 +495,7 @@ export const products = pgTable(
   // VECTOR SEARCH INDEXES
   // ========================================================
 
-  (table: any) => [
+  (table) => [
     // ------------------------------------------------------
     // CLIP HNSW INDEX
     // ------------------------------------------------------
@@ -603,6 +603,8 @@ export const productColors = pgTable(
     // Example: #000000
     colorCode: text("color_code"),
 
+    usdPrice: numeric("usd_price", { precision: 10, scale: 2 }),
+
     // ======================================================
     // IMAGE FOR THIS SPECIFIC COLOR
     // ======================================================
@@ -635,7 +637,7 @@ export const productColors = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table: any) => ({
+  (table) => ({
     productIdx: index(
       "product_colors_product_idx"
     ).on(table.productId),
@@ -710,7 +712,7 @@ export const productSizeGuides = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table: any) => ({
+  (table) => ({
     productIdx: index(
       "product_size_guides_product_idx"
     ).on(table.productId),
@@ -876,7 +878,7 @@ export const productMobileClipEmbeddings = pgTable(
       .notNull(),
   },
 
-  (table: any) => [
+  (table) => [
     // --------------------------------------------------------
     // PRODUCT LOOKUP
     // --------------------------------------------------------
@@ -952,6 +954,8 @@ export const productSizeGuideRows = pgTable(
     size: text("size")
       .notNull(),
 
+    usdPrice: numeric("usd_price", { precision: 10, scale: 2 }),
+
     measurements: jsonb("measurements")
       .notNull()
       .default({}),
@@ -978,7 +982,7 @@ export const productSizeGuideRows = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table : any) => ({
+  (table) => ({
     sizeGuideIdx: index(
       "product_size_guide_rows_guide_idx"
     ).on(table.sizeGuideId),
@@ -1011,7 +1015,7 @@ export const appSettings = pgTable('app_settings', {
   prepaymentPercentage: numeric('prepayment_percentage', { precision: 5, scale: 2 }).default('30.00'),
   rewardThreshold: numeric('reward_threshold', { precision: 10, scale: 2 }).default('5000.00'),
   rewardType: text('reward_type').default('discount'),
-  rewardValue: numeric('reward_value', { precision: 10, scale: 2 }).default('500.00'),
+  rewardValue: text('reward_value').default('500.00'),
   warehouseAddress: text("warehouse_address"),
   warehouseLat: decimal("warehouse_lat"),
   warehouseLng: decimal("warehouse_lng"),
@@ -1073,7 +1077,7 @@ export const messages = pgTable("messages", {
   // Dynamically points to the precise timestamp when the database evicts this data row!
   expiresAt: timestamp("expires_at", { withTimezone: true })
     .notNull(),
-}, (table: any) => ({
+}, (table) => ({
   createdAtIndex: index("msg_created_at_idx").on(table.createdAt),
   // 🎯 EXPRIATION INDEX: Makes the background cleaning scans extremely fast
   expiresAtIndex: index("msg_expires_at_idx").on(table.expiresAt),
