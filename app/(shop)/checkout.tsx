@@ -13,6 +13,24 @@ import * as SecureStore from "expo-secure-store"
 
 import { API_URL } from '@/lib/config';
 
+const parseGiftReward = (value: unknown, locale: string) => {
+  const parts = String(value ?? '')
+    .split('|')
+    .map((part) => part.trim());
+  const amountPattern = /^(?:AFN\s*)?\d+(?:\.\d+)?(?:\s*AFN)?$/i;
+  const amountIndex = parts.findIndex((part) => amountPattern.test(part));
+  const discount = amountIndex >= 0
+    ? Number(parts[amountIndex].replace(/AFN/gi, '').trim())
+    : 0;
+  const labels = parts.filter((_, index) => index !== amountIndex);
+  const localeIndex = locale === 'fa' ? 1 : locale === 'ps' ? 2 : 0;
+  const gift = labels.length >= 3
+    ? labels[localeIndex] ?? labels[0]
+    : labels[0] ?? '';
+
+  return { gift, discount };
+};
+
 export default function CheckoutScreen() {
   const router = useRouter();
   const { t, isRTL, locale } = useLanguage();
@@ -289,9 +307,8 @@ const totals = useMemo(() => {
     settings?.rewardThreshold ?? 5000
   );
 
-  const rewardValue = Number(
-    settings?.rewardValue ?? 500
-  );
+  const rewardValue = Number(settings?.rewardValue ?? 500);
+  const giftReward = parseGiftReward(settings?.rewardValue, locale);
 
   const rewardType =
     settings?.rewardType ?? 'discount';
@@ -478,17 +495,12 @@ const totals = useMemo(() => {
     if (
       rewardType === 'discount'
     ) {
-      rewardDiscount =
-        Math.min(
-          rewardValue,
-          subtotal
-        );
+      rewardDiscount = Number.isFinite(rewardValue)
+        ? Math.max(0, rewardValue)
+        : 0;
     } else {
-      const giftLabel = String(
-        settings?.rewardValue ?? ''
-      ).trim();
-      earnedGift =
-        giftLabel || 'FREE GIFT';
+      rewardDiscount = giftReward.discount;
+      earnedGift = giftReward.gift || 'FREE GIFT';
     }
   }
 
@@ -605,8 +617,16 @@ const totals = useMemo(() => {
       ? promoDiscount
       : 0;
 
-  const fixedRewardDiscount =
-    rewardDiscount;
+  const fixedRewardDiscount = Math.min(
+    rewardDiscount,
+    Math.max(
+      0,
+      subtotal -
+        itemPercentageDiscount -
+        fixedNewUserDiscount -
+        fixedPromoDiscount
+    )
+  );
 
 
   // ============================================================
@@ -731,6 +751,7 @@ const totals = useMemo(() => {
   settings,
   appliedPromo,
   cachedUser,
+  locale,
 ]);
   // ============================================================
   // PROMO VALIDATION
@@ -2228,7 +2249,8 @@ return (
               color="#15803D"
             />
             <Text style={styles.giftCelebrationText}>
-              {(t('giftTitle') || 'MILESTONE GIFT UNLOCKED')}: {totals.gift}
+              {(t('giftBody') || 'MILESTONE GIFT UNLOCKED: {gift} WILL BE INCLUDED FOR FREE!')
+                .replace('{gift}', () => totals.gift)}
             </Text>
           </View>
         )}
