@@ -67,6 +67,7 @@ const { id } = useLocalSearchParams<{ id: string }>();
   const [selectedColor, setSelectedColor] = useState<string>("Standard");
   const [userRating, setUserRating] = useState<number>(5);
 const [activeImageIndex, setActiveImageIndex] = useState(0);
+const heroGalleryRef = useRef<ScrollView | null>(null);
 const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 const [imageViewerVisible, setImageViewerVisible] = useState(false);
 const [visualScanning, setVisualScanning] = useState(false);
@@ -956,8 +957,9 @@ const handleColorChange = (
 
   setSelectedColor(cleanColor);
 
-  // Reset the gallery so the selected color starts from its first image.
+  // Reset the gallery so the selected color's first image becomes the hero.
   setActiveImageIndex(0);
+  heroGalleryRef.current?.scrollTo({ x: 0, animated: false });
 };
 
 const colorOptions = useMemo(() => {
@@ -1344,22 +1346,24 @@ const getLocalizedColorName = (
   };
 
   const addToCart = () => {
-    if (!product) return;
+      if (!product) return false;
     if (Array.isArray(product?.availableSizes) && product.availableSizes.length > 0 && !selectedSize) {
       // 🎯 THE ALERT FIX: Localized Selection Validation Guard
-      return Alert.alert(
+        Alert.alert(
         t("error") || "Error",
         t("sizeRequired") || "Please select a product size before continuing.",
       );
-    }
-    if (!selectedColor) {
-      // 🎯 THE ALERT FIX: Localized Selection Validation Guard
-      return Alert.alert(
-        t("error") || "Error",
-        t("colorRequired") ||
-          "Please select a product color before continuing.",
-      );
-    }
+        return false;
+      }
+      if (!selectedColor) {
+        // 🎯 THE ALERT FIX: Localized Selection Validation Guard
+        Alert.alert(
+          t("error") || "Error",
+          t("colorRequired") ||
+            "Please select a product color before continuing.",
+        );
+        return false;
+      }
 
     const optimizedProductPayload = {
       ...product,
@@ -1374,6 +1378,7 @@ const getLocalizedColorName = (
       Animated.spring(cartButtonScale, { toValue: 1, friction: 4, useNativeDriver: true }),
     ]).start();
     setTimeout(() => setCartAddedVisible(false), 1600);
+    return true;
   };
 
 // ============================================================
@@ -1410,10 +1415,6 @@ const productImages = useMemo(() => {
     orderedImages.push(image);
   };
 
-  // The original product image is always the first gallery image.
-  // Color selection adds its image after it instead of replacing it.
-  addUniqueImage(mainImage);
-
   const colorImages =
     product.colorImages &&
     typeof product.colorImages === "object"
@@ -1442,33 +1443,44 @@ const productImages = useMemo(() => {
 
   const selectedColorName = String(selectedColor || "").trim().toLowerCase();
   if (selectedColorName && selectedColorName !== "standard") {
-    const selectedImages: string[] = [];
+    const selectedImages: any[] = [];
 
-    for (const colorName of colorNames) {
-      if (colorName.toLowerCase() !== selectedColorName) continue;
-
-      const mappedImages = Array.isArray(colorImages[colorName])
-        ? colorImages[colorName]
+    const selectedColorKey = colorNames.find(
+      (colorName: string) => colorName.toLowerCase() === selectedColorName
+    );
+    const mappedColorKey = Object.keys(colorImages).find(
+      (colorName) => colorName.trim().toLowerCase() === selectedColorName
+    );
+    const mappedImages = mappedColorKey
+      ? colorImages[mappedColorKey]
+      : selectedColorKey
+        ? colorImages[selectedColorKey]
         : [];
-      mappedImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
-
-      const variant = variantEntries.find((entry: any) => {
-        const names = [entry?.name, entry?.namePs, entry?.nameFa]
-          .filter(Boolean)
-          .map((value: string) => String(value).trim().toLowerCase());
-        return names.includes(selectedColorName);
-      });
-      const variantImages = Array.isArray(variant?.images)
-        ? variant.images
-        : typeof variant?.imageUrl === "string"
-          ? [variant.imageUrl]
-          : [];
-      variantImages.forEach((image: any) => selectedImages.push(String(image?.url || image?.imageUrl || image || "").trim()));
+    if (Array.isArray(mappedImages)) {
+      selectedImages.push(...mappedImages);
     }
 
-    selectedImages.forEach((image) => addUniqueImage(image));
+    const variant = variantEntries.find((entry: any) => {
+      const names = [entry?.name, entry?.namePs, entry?.nameFa]
+        .filter(Boolean)
+        .map((value: string) => String(value).trim().toLowerCase());
+      return names.includes(selectedColorName);
+    });
+    const variantImages = Array.isArray(variant?.images)
+      ? variant.images
+      : variant?.imageUrl
+        ? [variant.imageUrl]
+        : [];
+    selectedImages.push(...variantImages);
+
+    selectedImages.forEach(addUniqueImage);
+    // Put the selected variant first so the hero changes immediately on color selection.
+    addUniqueImage(mainImage);
+    if (orderedImages.length === 0 && mainImage) addUniqueImage(mainImage);
     return orderedImages;
   }
+
+  addUniqueImage(mainImage);
 
   for (const colorName of colorNames) {
     const mappedImages = Array.isArray(colorImages[colorName])
@@ -1820,6 +1832,7 @@ useEffect(() => {
 
   {productImages.length > 0 ? (
     <ScrollView
+      ref={heroGalleryRef}
       horizontal
       pagingEnabled
       showsHorizontalScrollIndicator={false}
@@ -3018,18 +3031,33 @@ useEffect(() => {
                           ]
                         : [];
 
+                  const canonicalColor =
+                    String(colorVariant.name || colorName || "").trim();
+                  const previewImageValue = images[0] || null;
                   const previewImage =
-                    images[0] || null;
+                    typeof previewImageValue === "string"
+                      ? previewImageValue
+                      : previewImageValue?.url ||
+                        previewImageValue?.imageUrl ||
+                        null;
+                  const isSelected =
+                    selectedColor.trim().toLowerCase() ===
+                    canonicalColor.toLowerCase();
 
 
                   return (
-                    <View
+                    <TouchableOpacity
                       key={
                         colorVariant.id ||
                         `detail-color-${index}`
                       }
+                      activeOpacity={0.8}
+                      onPress={() => handleColorChange(canonicalColor)}
                       style={
-                        styles.detailsColorItem
+                        [
+                          styles.detailsColorItem,
+                          isSelected && styles.detailsColorItemActive,
+                        ]
                       }
                     >
 
@@ -3077,7 +3105,7 @@ useEffect(() => {
                         ).toUpperCase()}
                       </Text>
 
-                    </View>
+                    </TouchableOpacity>
                   );
                 }
               )}
@@ -3130,22 +3158,32 @@ useEffect(() => {
                   size: string,
                   index: number
                 ) => (
-                  <View
+                  <TouchableOpacity
                     key={`detail-size-${size}-${index}`}
+                    activeOpacity={0.8}
+                    onPress={() => setSelectedSize(String(size))}
                     style={
-                      styles.detailsSizeBox
+                      [
+                        styles.detailsSizeBox,
+                        selectedSize === String(size) &&
+                          styles.detailsSizeBoxActive,
+                      ]
                     }
                   >
                     <Text
                       style={
-                        styles.detailsSizeText
+                        [
+                          styles.detailsSizeText,
+                          selectedSize === String(size) &&
+                            styles.detailsSizeTextActive,
+                        ]
                       }
                     >
                       {String(
                         size
                       ).toUpperCase()}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 )
               )}
 
@@ -3544,6 +3582,27 @@ useEffect(() => {
           styles.productDetailsBottom
         }
       >
+
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={[
+            styles.detailsAddToCartBtn,
+            cartAddedVisible && styles.callToBagBtnSuccess,
+          ]}
+          onPress={() => addToCart()}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name={cartAddedVisible ? "checkmark" : "bag-handle-outline"}
+            size={18}
+            color="#FFFFFF"
+          />
+          <Text style={styles.detailsAddToCartText}>
+            {cartAddedVisible
+              ? (t("addedToBag") || "Added").toUpperCase()
+              : (t("addToBag") || "Add to Bag").toUpperCase()}
+          </Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           activeOpacity={0.85}
@@ -3962,6 +4021,14 @@ detailsColorGrid: {
 detailsColorItem: {
   width: 92,
   alignItems: "center",
+  padding: 4,
+  borderWidth: 1,
+  borderColor: "transparent",
+  borderRadius: 8,
+},
+
+detailsColorItemActive: {
+  borderColor: "#111111",
 },
 
 detailsColorImage: {
@@ -4007,10 +4074,19 @@ detailsSizeBox: {
   justifyContent: "center",
 },
 
+detailsSizeBoxActive: {
+  backgroundColor: "#111111",
+  borderColor: "#111111",
+},
+
 detailsSizeText: {
   fontSize: 12,
   fontWeight: "700",
   color: "#222222",
+},
+
+detailsSizeTextActive: {
+  color: "#FFFFFF",
 },
 
 /* ============================================================
@@ -4120,6 +4196,25 @@ productDetailsBottom: {
   borderTopWidth: 1,
   borderTopColor: "#EEEEEE",
   backgroundColor: "#FFFFFF",
+},
+
+detailsAddToCartBtn: {
+  minHeight: 50,
+  marginBottom: 10,
+  paddingHorizontal: 18,
+  borderRadius: 14,
+  backgroundColor: "#111111",
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 10,
+},
+
+detailsAddToCartText: {
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontWeight: "900",
+  letterSpacing: 0.8,
 },
 imagePagination: {
   position: "absolute",
