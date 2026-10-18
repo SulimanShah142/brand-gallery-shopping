@@ -38,9 +38,9 @@ const HERO_IMAGE_HEIGHT = width;
 
 
 export default function UserProductDetails() {
-const { id, fromCategory } = useLocalSearchParams<{
+const { id, returnCategoryId } = useLocalSearchParams<{
   id: string;
-  fromCategory?: string;
+  returnCategoryId?: string;
 }>();
   const router = useRouter();
   const { setResults: setVisualSearchResults } = useVisualSearch();
@@ -1788,8 +1788,11 @@ useEffect(() => {
         >
           <TouchableOpacity
             onPress={() => {
-              if (fromCategory === 'true') {
-                router.back();
+              if (returnCategoryId) {
+                router.replace({
+                  pathname: '/categories/[id]',
+                  params: { id: returnCategoryId },
+                });
                 return;
               }
 
@@ -2305,7 +2308,10 @@ useEffect(() => {
                     style={styles.recommendationCard}
                     onPress={() => router.replace({
                       pathname: '/product/[id]',
-                      params: { id: String(item.id), fromCategory },
+                      params: {
+                        id: String(item.id),
+                        returnCategoryId,
+                      },
                     })}
                     activeOpacity={0.92}
                   >

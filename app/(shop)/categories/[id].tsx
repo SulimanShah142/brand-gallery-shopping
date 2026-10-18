@@ -216,7 +216,7 @@ export default function CategoryPage() {
         style={styles.productCard} 
         onPress={() => router.push({
           pathname: '/product/[id]',
-          params: { id: String(item.id), fromCategory: 'true' },
+          params: { id: String(item.id), returnCategoryId: String(id) },
         })}
         activeOpacity={0.9}
       >
