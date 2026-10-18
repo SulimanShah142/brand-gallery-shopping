@@ -38,7 +38,10 @@ const HERO_IMAGE_HEIGHT = width;
 
 
 export default function UserProductDetails() {
-const { id } = useLocalSearchParams<{ id: string }>();
+const { id, fromCategory } = useLocalSearchParams<{
+  id: string;
+  fromCategory?: string;
+}>();
   const router = useRouter();
   const { setResults: setVisualSearchResults } = useVisualSearch();
   const { data: session } = authClient.useSession();
@@ -1784,7 +1787,14 @@ useEffect(() => {
           scrollEventThrottle={250}
         >
           <TouchableOpacity
-            onPress={() => router.replace('/')}
+            onPress={() => {
+              if (fromCategory === 'true') {
+                router.back();
+                return;
+              }
+
+              router.replace('/');
+            }}
             style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 }}
           >
             <Ionicons name="arrow-back" size={20} color="#111111" />
@@ -2293,7 +2303,10 @@ useEffect(() => {
                   <TouchableOpacity
                     key={`recommended-${item.id}`}
                     style={styles.recommendationCard}
-                    onPress={() => router.replace(`/product/${item.id}`)}
+                    onPress={() => router.replace({
+                      pathname: '/product/[id]',
+                      params: { id: String(item.id), fromCategory },
+                    })}
                     activeOpacity={0.92}
                   >
                     <Image

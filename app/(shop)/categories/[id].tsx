@@ -214,7 +214,10 @@ export default function CategoryPage() {
       <TouchableOpacity 
         key={`category-prod-card-${item.id}`}
         style={styles.productCard} 
-        onPress={() => router.push(`/product/${item.id}`)}
+        onPress={() => router.push({
+          pathname: '/product/[id]',
+          params: { id: String(item.id), fromCategory: 'true' },
+        })}
         activeOpacity={0.9}
       >
         <View style={styles.imageContainer}>
