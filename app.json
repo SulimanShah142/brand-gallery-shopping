@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.slliman.userapp",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "associatedDomains": [
         "applinks:brand-gallery-deep-linking.vercel.app"
       ],
@@ -86,29 +87,34 @@
         }
       ],
       "expo-router",
-       [
-  "expo-build-properties",
-  {
-    "android": {
-      "compileSdkVersion": 36,
-      "targetSdkVersion": 36,
-      "buildToolsVersion": "36.0.0",
-      "ndkVersion": "28.1.13356709", 
-      "buildArchs": [
-        "armeabi-v7a",
-        "arm64-v8a"
-      ],
-      "enableMinifyInReleaseBuilds": true,
-      "enableShrinkResourcesInReleaseBuilds": true,
-      "packagingOptions": {
-        "jniLibs": {
-          "useLegacyPackaging": false
+      "@react-native-firebase/app",
+      "@react-native-firebase/analytics",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "dynamic"
+          },
+          "android": {
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "ndkVersion": "28.1.13356709",
+            "buildArchs": [
+              "armeabi-v7a",
+              "arm64-v8a"
+            ],
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "packagingOptions": {
+              "jniLibs": {
+                "useLegacyPackaging": false
+              }
+            },
+            "extraProguardRules": "-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod\n-keep class kotlin.Metadata { *; }\n-keep class * implements expo.modules.kotlin.records.Record { *; }\n-keep class * extends expo.modules.kotlin.sharedobjects.SharedObject"
+          }
         }
-      },
-      "extraProguardRules": "-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod\n-keep class kotlin.Metadata { *; }\n-keep class * implements expo.modules.kotlin.records.Record { *; }\n-keep class * extends expo.modules.kotlin.sharedobjects.SharedObject"
-    }
-  }
-],
+      ],
 
       [
         "expo-splash-screen",
