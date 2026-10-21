@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform, InteractionManager } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,7 +11,6 @@ import { useAuthGuard } from '@/lib/useAuthGuard';
 import { HomeTabProvider, useHomeTab } from '@/Contexts/HomeTabContext';
 import { VisualSearchProvider } from '@/Contexts/VisualSearchContext';
 import { initOfflineDb } from '@/lib/offline';
-import { preloadVisualEmbeddingModel } from '@/lib/visualEmbedding';
 
 
 export default function ShopLayout() {
@@ -41,11 +40,6 @@ function ShopLayoutContent() {
     async function prepareShopSystem() {
       try {
         await initOfflineDb().catch(() => {});
-        InteractionManager.runAfterInteractions(() => {
-          preloadVisualEmbeddingModel().catch((error) => {
-            console.warn('Shop visual model preload failed:', error);
-          });
-        });
         await new Promise((resolve) => setTimeout(resolve, 1200));
       } catch (error) {
         console.warn('Shop app bootstrap skipped an init error:', error);

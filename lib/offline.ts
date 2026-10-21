@@ -593,9 +593,12 @@ export async function loadCategoryLocal(id: string) {
   return result[0] ?? null;
 }
 
-export async function loadProductsLocal() {
+export async function loadProductsLocal(limit?: number) {
   try {
-    const local = await execSql('SELECT * FROM products;');
+    const hasLimit = typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0;
+    const local = hasLimit
+      ? await execSql('SELECT * FROM products LIMIT ?;', [limit])
+      : await execSql('SELECT * FROM products;');
     return (local || []) as any[];
   } catch (err) {
     console.error('loadProductsLocal error', err);

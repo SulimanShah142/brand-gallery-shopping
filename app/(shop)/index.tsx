@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import {
   ScrollView, TouchableOpacity, Text, StyleSheet, View,
   Dimensions, RefreshControl, TextInput, ActivityIndicator,
-  FlatList, Modal, Animated, Easing, InteractionManager,
+  FlatList, Modal, Animated, Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +19,7 @@ import { API_URL } from '@/lib/config';
 import * as ImagePicker from 'expo-image-picker';
 import { useVisualSearch } from '@/Contexts/VisualSearchContext';
 import { searchHomeProductsByEmbedding } from '@/lib/visualSearch';
-import { generateVisualEmbedding, preloadVisualEmbeddingModel } from '@/lib/visualEmbedding';
+import { generateVisualEmbedding } from '@/lib/visualEmbedding';
 
 const { width } = Dimensions.get('window');
 const PRODUCT_CARD_WIDTH = (width - 42) / 2;
@@ -44,6 +43,8 @@ export default function HomePage() {
   const [activeAdIndex, setActiveAdIndex] = useState(0);
   const { registerHomeActions } = useHomeTab();
   const catalogSyncInProgressRef = useRef(false);
+  const loadDataInProgressRef = useRef(false);
+  const loadMoreInProgressRef = useRef(false);
   const [visualSearchModalVisible, setVisualSearchModalVisible] = useState(false);
   const [visualSearchCategoryModalVisible, setVisualSearchCategoryModalVisible] = useState(false);
   const handleSelectVisualSearchCategory = useCallback((_categoryId: string) => {
@@ -281,8 +282,16 @@ const safeFetchAndSyncProducts = useCallback(
 );
 
 const loadMoreProducts = useCallback(async () => {
-  if (loadingMoreProducts || !hasMoreProducts) return;
+  if (
+    loadDataInProgressRef.current ||
+    loadMoreInProgressRef.current ||
+    loadingMoreProducts ||
+    !hasMoreProducts
+  ) {
+    return;
+  }
 
+  loadMoreInProgressRef.current = true;
   setLoadingMoreProducts(true);
   const nextPage = productPage + 1;
 
@@ -305,6 +314,7 @@ const loadMoreProducts = useCallback(async () => {
       setDisplayLimit((currentLimit) => Math.max(currentLimit, nextPage * 20));
     }
   } finally {
+    loadMoreInProgressRef.current = false;
     if (isMounted.current) setLoadingMoreProducts(false);
   }
 }, [hasMoreProducts, loadingMoreProducts, productPage, safeFetchAndSyncProducts]);
@@ -312,6 +322,9 @@ const loadMoreProducts = useCallback(async () => {
 
   // 🎯 THE STABLE SECURED ATOMIC SYSTEM LOADER (HOME VIEW)
   const handleLoadData = useCallback(async (isInitialLoad = false) => {
+    if (loadDataInProgressRef.current || loadMoreInProgressRef.current) return;
+    loadDataInProgressRef.current = true;
+
     let online = false;
 
     try {
@@ -325,7 +338,7 @@ const loadMoreProducts = useCallback(async () => {
       await initOfflineDb();
 
       const localCats = await loadCategoriesLocal().catch(() => []);
-      const localProds = await loadProductsLocal().catch(() => []);
+      const localProds = await loadProductsLocal(20).catch(() => []);
 
       let settingsResult = null;
       try {
@@ -397,16 +410,25 @@ const loadMoreProducts = useCallback(async () => {
     } catch (err) {
       console.error('❌ Home Page operational collection thread failed:', err);
     } finally {
+      loadDataInProgressRef.current = false;
       if (isMounted.current) {
         setIsLoading(false);
         setRefreshing(false);
         if (isInitialLoad) setInitialCatalogLoadComplete(true);
       }
     }
-  }, [])
+  }, [safeFetchAndSyncProducts])
 
   
   // EXACTLY ONE mount listener is preserved, eliminating concurrent thread resource competition!
+useEffect(() => {
+  isMounted.current = true;
+
+  return () => {
+    isMounted.current = false;
+  };
+}, []);
+
 // HOME TAB ACTIONS
 useEffect(() => {
   registerHomeActions({
@@ -435,24 +457,8 @@ useEffect(() => {
 
 // INITIAL HOME LOAD — RUN ONCE
 useEffect(() => {
-  handleLoadData(true);
-}, []);
-
-useFocusEffect(
-  useCallback(() => {
-    setProducts((currentProducts) => shuffleArray(currentProducts));
-  }, [])
-);
-
-useEffect(() => {
-  const preloadTask = InteractionManager.runAfterInteractions(() => {
-    preloadVisualEmbeddingModel().catch((error) => {
-      console.warn('Visual search model preload failed:', error);
-    });
-  });
-
-  return () => preloadTask.cancel();
-}, []);
+  void handleLoadData(true);
+}, [handleLoadData]);
 
 
   useEffect(() => {
