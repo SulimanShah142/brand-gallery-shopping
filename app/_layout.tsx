@@ -1,6 +1,5 @@
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View } from 'react-native';
+import { useEffect, useRef } from "react";
 import { InteractionManager, Linking } from 'react-native';
 import { Settings, AppLink } from 'react-native-fbsdk-next';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -13,16 +12,11 @@ import { authClient } from '@/lib/auth-client';
 import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 
 function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
-  const [initialized, setInitialized] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     let unsubscribe: (() => void) | undefined;
 
     initOneSignal(null)
-      .catch((error) => {
-        console.warn('OneSignal root initialization failed:', error);
-      })
       .then(() => {
         if (!mounted) return;
 
@@ -38,8 +32,8 @@ function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
           }
         });
       })
-      .finally(() => {
-        if (mounted) setInitialized(true);
+      .catch((error) => {
+        console.warn('OneSignal root initialization failed:', error);
       });
 
     return () => {
@@ -47,14 +41,6 @@ function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
       unsubscribe?.();
     };
   }, []);
-
-  if (!initialized) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
 
   return <>{children}</>;
 }

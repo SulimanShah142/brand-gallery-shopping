@@ -5,9 +5,9 @@ import {
   Image,
   Text,
   StyleSheet,
+  Linking,
 } from "react-native";
-import { Linking } from "react-native";
-import { useRouter, useSegments } from "expo-router";
+import { Redirect, useRouter, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { API_URL } from "@/lib/config";
 import { authClient } from "@/lib/auth-client";
@@ -18,6 +18,8 @@ export default function Boot() {
   const segments = useSegments();
 
   const [booting, setBooting] = useState(true);
+  const [hasProductDeepLink, setHasProductDeepLink] = useState(false);
+  const [redirectRoute, setRedirectRoute] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   const routingRef = useRef(false);
@@ -30,7 +32,13 @@ export default function Boot() {
     if (!mountedRef.current || routingRef.current) return;
 
     routingRef.current = true;
-    router.replace(route as any);
+    setRedirectRoute(route);
+    try {
+      router.replace(route as any);
+    } catch (error) {
+      routingRef.current = false;
+      console.warn("Boot navigation failed:", error);
+    }
   };
 
   // =====================================================
@@ -48,6 +56,9 @@ export default function Boot() {
         hasProductDeepLink = Boolean(
           initialUrl && /\/products?\/[^/?#\s]+/i.test(initialUrl)
         );
+        if (mountedRef.current) {
+          setHasProductDeepLink(hasProductDeepLink);
+        }
 
         console.log(
           "Boot initial URL:",
@@ -330,7 +341,16 @@ export default function Boot() {
     );
   }
 
-  return null;
+  if (!hasProductDeepLink) {
+    return <Redirect href={(redirectRoute ?? "/(shop)") as any} />;
+  }
+
+  return (
+    <View style={styles.splashContainer}>
+      <ActivityIndicator size="small" color="#000" />
+      <Text style={styles.splashText}>OPENING PRODUCT...</Text>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

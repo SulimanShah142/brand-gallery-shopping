@@ -36,7 +36,7 @@ export default function CheckoutScreen() {
   const { t, isRTL, locale } = useLanguage();
   const { clearCart, state } = useCart();
 
-  const cartItems = state?.items || [];
+  const cartItems = useMemo(() => state?.items || [], [state?.items]);
 
   const {
     data: session,
@@ -260,6 +260,42 @@ const [form, setForm] = useState({
     };
   }, []);
 
+  useEffect(() => {
+    const giftProductId = String(
+      settings?.rewardType === 'gift' ? settings?.rewardValue ?? '' : ''
+    ).trim();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(giftProductId) ||
+      hydratedProductsMap[giftProductId]
+    ) {
+      return;
+    }
+
+    let mounted = true;
+    fetch(`${API_URL}/api/products/${encodeURIComponent(giftProductId)}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Gift product request failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((product) => {
+        if (mounted && product?.id) {
+          setHydratedProductsMap((current) => ({
+            ...current,
+            [String(product.id).trim()]: product,
+          }));
+        }
+      })
+      .catch((error) => {
+        console.warn('Checkout gift product hydration failed:', error);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [settings?.rewardType, settings?.rewardValue, hydratedProductsMap]);
+
   // ============================================================
   // GPS BOOTSTRAP
   // ============================================================
@@ -309,6 +345,14 @@ const totals = useMemo(() => {
 
   const rewardValue = Number(settings?.rewardValue ?? 500);
   const giftReward = parseGiftReward(settings?.rewardValue, locale);
+  const configuredGiftProductId = String(
+    settings?.rewardType === 'gift' ? settings?.rewardValue ?? '' : ''
+  ).trim();
+  const configuredGiftProduct = hydratedProductsMap[configuredGiftProductId] ?? null;
+  const isConfiguredProductGift =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      configuredGiftProductId
+    );
 
   const rewardType =
     settings?.rewardType ?? 'discount';
@@ -464,6 +508,7 @@ const totals = useMemo(() => {
 
   let rewardDiscount = 0;
   let earnedGift: string | null = null;
+  let earnedGiftProduct: any = null;
 
   const hasClaimedReward =
     cachedUser?.hasClaimedMilestoneReward === true ||
@@ -498,6 +543,16 @@ const totals = useMemo(() => {
       rewardDiscount = Number.isFinite(rewardValue)
         ? Math.max(0, rewardValue)
         : 0;
+    } else if (isConfiguredProductGift) {
+      if (configuredGiftProduct) {
+        earnedGiftProduct = configuredGiftProduct;
+        earnedGift =
+          locale === 'fa'
+            ? configuredGiftProduct.nameFa || configuredGiftProduct.name
+            : locale === 'ps'
+              ? configuredGiftProduct.namePs || configuredGiftProduct.name
+              : configuredGiftProduct.name;
+      }
     } else {
       rewardDiscount = giftReward.discount;
       earnedGift = giftReward.gift || 'FREE GIFT';
@@ -713,6 +768,7 @@ const totals = useMemo(() => {
     rewardDiscount,
 
     gift: earnedGift,
+    giftProduct: earnedGiftProduct,
 
     shipping,
 
@@ -749,6 +805,7 @@ const totals = useMemo(() => {
 }, [
   cartItems,
   settings,
+  hydratedProductsMap,
   appliedPromo,
   cachedUser,
   locale,
@@ -2250,8 +2307,27 @@ return (
             />
             <Text style={styles.giftCelebrationText}>
               {(t('giftBody') || 'MILESTONE GIFT UNLOCKED: {gift} WILL BE INCLUDED FOR FREE!')
-                .replace('{gift}', () => totals.gift)}
+                .replace('{gift}', String(totals.gift ?? ''))}
             </Text>
+            {totals.giftProduct?.imageUrl ? (
+              <Image
+                source={{ uri: totals.giftProduct.imageUrl }}
+                style={styles.giftProductImage}
+              />
+            ) : null}
+            {totals.giftProduct ? (
+              <View style={styles.giftProductDetails}>
+                <Text style={styles.giftProductName}>{totals.gift}</Text>
+                <Text style={styles.giftProductDescription}>
+                  {(locale === 'fa'
+                    ? totals.giftProduct.descriptionFa || totals.giftProduct.description
+                    : locale === 'ps'
+                      ? totals.giftProduct.descriptionPs || totals.giftProduct.description
+                      : totals.giftProduct.description) ||
+                    'This product will be included in your order at no charge.'}
+                </Text>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -3544,6 +3620,10 @@ billingSummarySheet: {
   // Gift validation badges configurations
   giftCelebrationBadge: { backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7', padding: 14, flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8 },
   giftCelebrationText: { fontSize: 11, color: '#15803D', fontWeight: '700', flex: 1, letterSpacing: 0.2 },
+  giftProductImage: { width: 48, height: 48, borderRadius: 8, backgroundColor: '#E5E7EB' },
+  giftProductDetails: { flex: 1, minWidth: 0 },
+  giftProductName: { fontSize: 12, color: '#166534', fontWeight: '800' },
+  giftProductDescription: { fontSize: 10, color: '#15803D', marginTop: 3, lineHeight: 14 },
 mapContainer: {
   height: 220,
   width: '100%',

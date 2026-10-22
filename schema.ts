@@ -1015,6 +1015,7 @@ export const appSettings = pgTable('app_settings', {
   prepaymentPercentage: numeric('prepayment_percentage', { precision: 5, scale: 2 }).default('30.00'),
   rewardThreshold: numeric('reward_threshold', { precision: 10, scale: 2 }).default('5000.00'),
   rewardType: text('reward_type').default('discount'),
+  // Stores an AFN amount for discounts, or a product UUID / legacy gift label for gifts.
   rewardValue: text('reward_value').default('500.00'),
   warehouseAddress: text("warehouse_address"),
   warehouseLat: decimal("warehouse_lat"),
