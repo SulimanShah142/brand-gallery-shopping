@@ -56,12 +56,12 @@ async function initializeOneSignal() {
 
 
     // 2. CRITICAL FIX FOR ANDROID 13+: Explicitly force OneSignal to handle the permission prompt
-    if (Platform.OS === 'android' && shouldRequestPermission) {
-      console.log("🛰️ Triggering Native OneSignal Android Permission Prompt...");
+    if (shouldRequestPermission) {
+      if (Platform.OS === 'android') {
+        console.log("🛰️ Triggering Native OneSignal Android Permission Prompt...");
+      }
       const accepted = await OneSignal.Notifications.requestPermission(true);
       console.log("🔔 OneSignal Permission State Checked:", accepted);
-    } else {
-      OneSignal.Notifications.requestPermission(true);
     }
 
     // 3. Capture and log the structural Subscription ID

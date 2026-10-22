@@ -7,11 +7,10 @@ import {
   StyleSheet,
   Linking,
 } from "react-native";
-import { Redirect, useRouter, useSegments } from "expo-router";
+import { useRouter, useSegments } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { API_URL } from "@/lib/config";
 import { authClient } from "@/lib/auth-client";
-import { initOneSignal } from '@/lib/notiifcations';
 
 export default function Boot() {
   const router = useRouter();
@@ -19,7 +18,6 @@ export default function Boot() {
 
   const [booting, setBooting] = useState(true);
   const [hasProductDeepLink, setHasProductDeepLink] = useState(false);
-  const [redirectRoute, setRedirectRoute] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
   const routingRef = useRef(false);
@@ -30,9 +28,7 @@ export default function Boot() {
 
   const safeReplace = (route: string) => {
     if (!mountedRef.current || routingRef.current) return;
-
     routingRef.current = true;
-    setRedirectRoute(route);
     try {
       router.replace(route as any);
     } catch (error) {
@@ -99,10 +95,6 @@ export default function Boot() {
         if (!token || !cachedUserString) {
           authClient.setSessionData(null);
 
-          void initOneSignal(null).catch((error) => {
-            console.log('OneSignal guest initialization failed:', error);
-          });
-
           if (!isGuest) {
             await SecureStore.setItemAsync("guest_mode", "true").catch(() => {});
             console.log("🔐 No session found, allowing guest browsing");
@@ -129,10 +121,6 @@ export default function Boot() {
           authClient.setSessionData({
             token,
             user: cachedUser,
-          });
-
-          void initOneSignal(cachedUser?.id || null).catch((error) => {
-            console.log('OneSignal authenticated restore failed:', error);
           });
         } catch (err) {
           console.log(
@@ -341,14 +329,12 @@ export default function Boot() {
     );
   }
 
-  if (!hasProductDeepLink) {
-    return <Redirect href={(redirectRoute ?? "/(shop)") as any} />;
-  }
-
   return (
     <View style={styles.splashContainer}>
       <ActivityIndicator size="small" color="#000" />
-      <Text style={styles.splashText}>OPENING PRODUCT...</Text>
+      <Text style={styles.splashText}>
+        {hasProductDeepLink ? "OPENING PRODUCT..." : "OPENING SHOP..."}
+      </Text>
     </View>
   );
 }
