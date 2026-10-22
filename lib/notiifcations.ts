@@ -1,10 +1,15 @@
 import { OneSignal } from 'react-native-onesignal';
 import { Platform } from 'react-native';
+import type { NotificationWillDisplayEvent } from 'react-native-onesignal';
 
 const ONESIGNAL_APP_ID = "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d";
 let oneSignalInitialized = false;
 let foregroundListenerAttached = false;
 let oneSignalInitPromise: Promise<void> | null = null;
+let permissionRequested = false;
+const foregroundNotificationListeners = new Set<
+  (event: NotificationWillDisplayEvent) => void
+>();
 
 const waitForSubscriptionId = async (attempts = 10): Promise<string | null> => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -16,61 +21,63 @@ const waitForSubscriptionId = async (attempts = 10): Promise<string | null> => {
 };
 
 // 🎯 THE BALANCING PROXIES FIX: Added an optional custom user ID parameter slot!
-export const initOneSignal = async (authenticatedUserId?: string | null) => {
-  if (oneSignalInitPromise) {
-    await oneSignalInitPromise;
-  } else {
-    oneSignalInitPromise = initializeOneSignal();
-    await oneSignalInitPromise;
-  }
-
-  if (authenticatedUserId) {
-    await linkOneSignalUser(authenticatedUserId);
-  }
+export const addForegroundNotificationListener = (
+  listener: (event: NotificationWillDisplayEvent) => void
+) => {
+  foregroundNotificationListeners.add(listener);
+  return () => {
+    foregroundNotificationListeners.delete(listener);
+  };
 };
 
-async function initializeOneSignal() {
-  try {
-    const shouldRequestPermission = !oneSignalInitialized;
+export const initOneSignal = async (
+  authenticatedUserId?: string | null,
+  requestPermission = false
+) => {
+  if (!oneSignalInitPromise) {
+    oneSignalInitPromise = initializeOneSignal().catch((error) => {
+      oneSignalInitPromise = null;
+      throw error;
+    });
+  }
+  await oneSignalInitPromise;
 
-    // 1. Initialize with your specific App ID
-    if (!oneSignalInitialized) {
-      OneSignal.initialize(ONESIGNAL_APP_ID);
-      oneSignalInitialized = true;
-    }
-
-    // 🎯 THE FOREGROUND NOTIFICATION VIEW BANNER ENABLER:
-    // Forces drop-down system alerts to slide down into view even if the user has the app open!
-      // Inside lib/notifications.ts -> Locate your foreground listener block:
-    
-    // 🎯 THE CORRECT V5 FOREGROUND DISPLAY FIX:
-    // Uses the exact properties and functions specified by OneSignal v5 SDK.
-    // This stops the TypeError crash instantly and drops the banner onto the display!
-    if (!foregroundListenerAttached) {
-      OneSignal.Notifications.addEventListener('foregroundWillDisplay', (event: any) => {
-        console.log("📩 [V5 SDK] Intercepted foreground alert event banner:", event.notification.title);
-        event.notification.display();
-      });
-      foregroundListenerAttached = true;
-    }
-
-
-    // 2. CRITICAL FIX FOR ANDROID 13+: Explicitly force OneSignal to handle the permission prompt
-    if (shouldRequestPermission) {
+  if (requestPermission && !permissionRequested) {
+    permissionRequested = true;
+    try {
       if (Platform.OS === 'android') {
         console.log("🛰️ Triggering Native OneSignal Android Permission Prompt...");
       }
       const accepted = await OneSignal.Notifications.requestPermission(true);
       console.log("🔔 OneSignal Permission State Checked:", accepted);
+    } catch (error) {
+      permissionRequested = false;
+      console.warn('OneSignal permission request failed:', error);
     }
-
-    // 3. Capture and log the structural Subscription ID
-    const subId = await waitForSubscriptionId();
-    console.log("🔑 Active Linked Hardware ID:", subId);
-
-  } catch (error) {
-    console.error("❌ OneSignal Native Boot Failure:", error);
   }
+
+  if (authenticatedUserId) {
+    await linkOneSignalUser(authenticatedUserId);
+  }
+}
+
+async function initializeOneSignal() {
+  if (!oneSignalInitialized) {
+    OneSignal.initialize(ONESIGNAL_APP_ID);
+    oneSignalInitialized = true;
+  }
+
+  if (!foregroundListenerAttached) {
+    OneSignal.Notifications.addEventListener('foregroundWillDisplay', (event: any) => {
+      console.log("📩 [V5 SDK] Intercepted foreground alert event banner:", event.notification.title);
+      foregroundNotificationListeners.forEach((listener) => listener(event));
+      event.notification.display();
+    });
+    foregroundListenerAttached = true;
+  }
+
+  const subId = await waitForSubscriptionId();
+  console.log("🔑 Active Linked Hardware ID:", subId);
 }
 
 async function linkOneSignalUser(authenticatedUserId: string) {

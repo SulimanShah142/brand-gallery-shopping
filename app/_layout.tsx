@@ -1,4 +1,4 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useRootNavigationState } from 'expo-router';
 import { useEffect, useRef } from "react";
 import { InteractionManager, Linking } from 'react-native';
 import { Settings, AppLink } from 'react-native-fbsdk-next';
@@ -11,54 +11,70 @@ import { initOneSignal } from '@/lib/notiifcations';
 import { authClient } from '@/lib/auth-client';
 import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 
-function OneSignalBootstrap({ children }: { children: React.ReactNode }) {
+function OneSignalBootstrap() {
+  const navigationState = useRootNavigationState();
+
   useEffect(() => {
+    if (!navigationState?.key) return;
+
     let mounted = true;
     let unsubscribe: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    initOneSignal(null)
-      .then(() => {
-        if (!mounted) return;
+    const interactionTask = InteractionManager.runAfterInteractions(() => {
+      timer = setTimeout(() => {
+        void initOneSignal()
+          .then(() => {
+            if (!mounted) return;
 
-        unsubscribe = authClient.subscribe((session) => {
-          const userId = session?.user?.id;
-          if (userId) {
-            void syncLanguagePreference().catch((error) => {
-              console.warn('User language preference sync failed:', error);
+            unsubscribe = authClient.subscribe((session) => {
+              const userId = session?.user?.id;
+              if (userId) {
+                void syncLanguagePreference().catch((error) => {
+                  console.warn('User language preference sync failed:', error);
+                });
+                void initOneSignal(String(userId)).catch((error) => {
+                  console.warn('OneSignal user linking failed:', error);
+                });
+              }
             });
-            void initOneSignal(String(userId)).catch((error) => {
-              console.warn('OneSignal user linking failed:', error);
-            });
-          }
-        });
-      })
-      .catch((error) => {
-        console.warn('OneSignal root initialization failed:', error);
-      });
+          })
+          .catch((error) => {
+            console.warn('OneSignal deferred initialization failed:', error);
+          });
+      }, 1200);
+    });
 
     return () => {
       mounted = false;
+      interactionTask.cancel();
+      if (timer) clearTimeout(timer);
       unsubscribe?.();
     };
-  }, []);
+  }, [navigationState?.key]);
 
-  return <>{children}</>;
+  return null;
 }
 
 function DeepLinkHandler() {
   const router = useRouter();
+  const navigationState = useRootNavigationState();
   const navigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (!navigationState?.key) return;
+
+    let nativeSdkTimer: ReturnType<typeof setTimeout> | undefined;
+    let deferredAppLinkTimer: ReturnType<typeof setTimeout> | undefined;
+
     const nativeSdkTask = InteractionManager.runAfterInteractions(() => {
-      const timer = setTimeout(() => {
+      nativeSdkTimer = setTimeout(() => {
         try {
           Settings.initializeSDK();
         } catch (error) {
           console.warn('Meta SDK initialization error:', error);
         }
       }, 1200);
-      return () => clearTimeout(timer);
     });
 
     // ---------------------------------------------------------
@@ -221,7 +237,7 @@ function DeepLinkHandler() {
     // User clicked Meta ad -> installed app -> first launch.
     // ---------------------------------------------------------
     const deferredAppLinkTask = InteractionManager.runAfterInteractions(() => {
-      const timer = setTimeout(() => {
+      deferredAppLinkTimer = setTimeout(() => {
         AppLink.fetchDeferredAppLink()
           .then((url) => {
             if (url) parseAndNavigate(url);
@@ -230,7 +246,6 @@ function DeepLinkHandler() {
             console.warn('DeepLinkHandler Meta deferred app link error:', error);
           });
       }, 1800);
-      return () => clearTimeout(timer);
     });
 
     // ---------------------------------------------------------
@@ -257,13 +272,15 @@ function DeepLinkHandler() {
       subscription.remove();
       nativeSdkTask.cancel();
       deferredAppLinkTask.cancel();
+      if (nativeSdkTimer) clearTimeout(nativeSdkTimer);
+      if (deferredAppLinkTimer) clearTimeout(deferredAppLinkTimer);
       clearTimeout(initialUrlTimer);
 
       if (navigationTimerRef.current) {
         clearTimeout(navigationTimerRef.current);
       }
     };
-  }, [router]);
+  }, [router, navigationState?.key]);
 
   return null;
 }
@@ -271,23 +288,22 @@ function DeepLinkHandler() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <OneSignalBootstrap>
-        <LanguageProvider>
-          <CartProvider>
-            <BadgeProvider>
-              <DeepLinkHandler />
+      <LanguageProvider>
+        <CartProvider>
+          <BadgeProvider>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+              }}
+            />
 
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                }}
-              />
+            <DeepLinkHandler />
+            <OneSignalBootstrap />
 
-              <AppUpdateBanner />
-            </BadgeProvider>
-          </CartProvider>
-        </LanguageProvider>
-      </OneSignalBootstrap>
+            <AppUpdateBanner />
+          </BadgeProvider>
+        </CartProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }

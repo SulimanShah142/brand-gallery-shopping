@@ -1,6 +1,7 @@
 // Contexts/BadgeContext.tsx -> Unified Dynamic Badge Hub
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { OneSignal, NotificationWillDisplayEvent } from 'react-native-onesignal';
+import type { NotificationWillDisplayEvent } from 'react-native-onesignal';
+import { addForegroundNotificationListener } from '@/lib/notiifcations';
 
 type BadgeContextType = {
   adminOrdersBadge: number;
@@ -44,11 +45,7 @@ export function BadgeProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    OneSignal.Notifications.addEventListener('foregroundWillDisplay', handleIncomingNotification);
-
-    return () => {
-      OneSignal.Notifications.removeEventListener('foregroundWillDisplay', handleIncomingNotification);
-    };
+    return addForegroundNotificationListener(handleIncomingNotification);
   }, []);
 
   const clearAdminOrders = () => setAdminOrdersBadge(0);

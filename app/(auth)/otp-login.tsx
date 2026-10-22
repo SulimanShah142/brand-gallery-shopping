@@ -54,7 +54,7 @@ export default function OTPLogin() {
     setLoading(true);
     try {
       const cleanPhoneDigits = phone.replace(/\s/g, ''); 
-      await initOneSignal(cleanPhoneDigits).catch(() => {});
+      await initOneSignal(cleanPhoneDigits, true).catch(() => {});
 
       const nativeSubscriptionStateId = await OneSignal.User.pushSubscription.getIdAsync().catch(() => null);
       const finalTrackingHeaderToken = nativeSubscriptionStateId;
@@ -555,4 +555,3 @@ welcomeText: {
     marginTop: 10,
   },
 });
-
