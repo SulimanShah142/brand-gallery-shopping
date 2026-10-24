@@ -9,6 +9,7 @@ import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '@/lib/config';
 import { OneSignal } from 'react-native-onesignal';
 import { initOneSignal } from '@/lib/notiifcations';
+import { trackLogin } from '@/lib/marketingAnalytics';
 
 export default function OTPLogin() {
   const router = useRouter();
@@ -118,6 +119,7 @@ export default function OTPLogin() {
       // direct password sign-in payload architecture structures!
       if (res.ok && data.success && data.session?.token) {
         console.log("✅ Custom OTP signature cleared. Burning secure hardware authentication keys...");
+        void trackLogin('sms');
         
         // Persist token using imported SecureStore
         await SecureStore.setItemAsync('custom_user_session_token', data.session.token.trim());

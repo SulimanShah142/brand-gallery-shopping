@@ -12,6 +12,7 @@ import * as SecureStore from "expo-secure-store"
 
 
 import { API_URL } from '@/lib/config';
+import { trackPurchase } from '@/lib/marketingAnalytics';
 
 const parseGiftReward = (value: unknown, locale: string) => {
   const parts = String(value ?? '')
@@ -1141,6 +1142,28 @@ items: totals.itemPricing.map(
         console.log(
           '✅ Order created successfully:',
           data?.order?.id
+        );
+
+        void trackPurchase(
+          data?.order?.id ? String(data.order.id) : undefined,
+          Math.max(0, Number(totals.final) - Number(totals.shipping)),
+          Number(totals.shipping),
+          [
+            ...cartItems.map((item: any) => ({
+              item_id: String(item.id),
+              item_name: String(item.name || 'Product'),
+              price: Number(item.price) || 0,
+              quantity: Number(item.quantity) || 1,
+            })),
+            ...(totals.giftProduct
+              ? [{
+                  item_id: String(totals.giftProduct.id),
+                  item_name: String(totals.giftProduct.name || 'Free gift'),
+                  price: 0,
+                  quantity: 1,
+                }]
+              : []),
+          ]
         );
 
         clearCart();

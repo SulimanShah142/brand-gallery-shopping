@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Link, useRouter } from "expo-router";
 import { authClient } from '@/lib/auth-client';
+import { trackSignUp } from '@/lib/marketingAnalytics';
 import { useLanguage } from "@/Contexts/LanguageContext";
 import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
@@ -94,6 +95,7 @@ const handleSignUp = async () => {
       phone: cleanPhone || undefined,
     });
 
+    void trackSignUp('email');
     router.replace('/');
     return;
   } catch (err: any) {
