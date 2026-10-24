@@ -794,10 +794,7 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       renderItem={renderProductItemCell}
       keyExtractor={(item) => `home-prod-${item.id}`}
       numColumns={2}
-      columnWrapperStyle={[
-        styles.gridRow,
-        isRTL && { flexDirection: 'row-reverse' },
-      ]}
+      columnWrapperStyle={styles.gridRow}
       showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
   removeClippedSubviews={!isRTL}

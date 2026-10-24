@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { I18nManager } from 'react-native';
+import { ActivityIndicator, I18nManager, StyleSheet, Text, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates'; // Required to restart app on flip
 import { LANGUAGES, Locale, isRTL, translate } from '@/lib/i18n';
@@ -45,21 +45,34 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>('en');
+  const [languageReady, setLanguageReady] = useState(false);
 
   // Load language on boot
   useEffect(() => {
+    let mounted = true;
+
     async function loadLanguage() {
       try {
         const stored = await SecureStore.getItemAsync(STORAGE_KEY);
         if (stored && (stored === 'fa' || stored === 'ps' || stored === 'en')) {
-          setLocaleState(stored as Locale);
-          await syncLanguagePreference(stored as Locale);
+          if (mounted) {
+            setLocaleState(stored as Locale);
+          }
+          void syncLanguagePreference(stored as Locale);
         }
       } catch (error) {
         console.warn('Unable to load language', error);
+      } finally {
+        if (mounted) {
+          setLanguageReady(true);
+        }
       }
     }
-    loadLanguage();
+
+    void loadLanguage();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const setLanguage = async (nextLocale: Locale) => {
@@ -100,6 +113,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     [locale]
   );
 
+  if (!languageReady) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color="#111111" />
+        <Text style={styles.loadingText}>LOADING...</Text>
+      </View>
+    );
+  }
+
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }
 
@@ -110,3 +132,18 @@ export function useLanguage() {
   }
   return context;
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: '#666666',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+});
