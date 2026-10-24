@@ -800,7 +800,7 @@ const renderHomeHeaderAndCategories = useCallback(() => {
       ]}
       showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
-  removeClippedSubviews={true}
+  removeClippedSubviews={!isRTL}
   initialNumToRender={8}
   maxToRenderPerBatch={8}
   windowSize={5}
