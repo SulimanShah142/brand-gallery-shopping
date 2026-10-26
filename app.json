@@ -2,7 +2,7 @@
   "expo": {
     "name": "Brand Gallery Shopping",
     "slug": "user-app",
-    "version": "1.0.44",
+    "version": "1.0.45",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.jpeg",
     "scheme": "userapp",
@@ -88,7 +88,6 @@
       ],
       "expo-router",
       "@react-native-firebase/app",
-      "@react-native-firebase/analytics",
       [
         "expo-build-properties",
         {
