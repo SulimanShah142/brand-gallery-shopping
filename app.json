@@ -11,7 +11,7 @@
     "edgeToEdgeEnabled": true,
     "predictiveBackGestureEnabled": false,
     "usesCleartextTraffic": true,
-    "owner": "shah-suliman",
+    "owner": "slliman",
 
     "ios": {
       "supportsTablet": true,
@@ -146,7 +146,7 @@
       "oneSignalAppId": "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d",
       "router": {},
       "eas": {
-        "projectId": "074c6e26-27f5-4c47-b086-5ee0955bd13b"
+        "projectId": "a1dc12ab-309d-46eb-9255-d0c09d926b29"
       }
     },
 
@@ -162,7 +162,7 @@
     "updates": {
       "enabled": true,
       "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/074c6e26-27f5-4c47-b086-5ee0955bd13b"
+      "url": "https://u.expo.dev/a1dc12ab-309d-46eb-9255-d0c09d926b29"
     }
   }
 }

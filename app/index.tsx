@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   ActivityIndicator,
@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Linking,
 } from "react-native";
-import { useRouter, useSegments } from "expo-router";
+import { useRootNavigationState, useRouter, useSegments, type Href } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { API_URL } from "@/lib/config";
 import { authClient } from "@/lib/auth-client";
@@ -15,33 +15,47 @@ import { authClient } from "@/lib/auth-client";
 export default function Boot() {
   const router = useRouter();
   const segments = useSegments();
+  const initialRouteSegment = segments[0];
+  const navigationState = useRootNavigationState();
 
   const [booting, setBooting] = useState(true);
   const [hasProductDeepLink, setHasProductDeepLink] = useState(false);
 
   const mountedRef = useRef(true);
   const routingRef = useRef(false);
+  const bootstrapRunRef = useRef(0);
 
   // =====================================================
   // ROUTING HELPER
   // =====================================================
 
-  const safeReplace = (route: string) => {
-    if (!mountedRef.current || routingRef.current) return;
+  const safeReplace = useCallback((route: Href, runId?: number) => {
+    if (
+      !mountedRef.current ||
+      (runId !== undefined && bootstrapRunRef.current !== runId) ||
+      routingRef.current
+    ) return;
     routingRef.current = true;
     try {
-      router.replace(route as any);
+      router.replace(route);
     } catch (error) {
       routingRef.current = false;
       console.warn("Boot navigation failed:", error);
     }
-  };
+  }, [router]);
 
   // =====================================================
   // SESSION RESTORE
   // =====================================================
 
   useEffect(() => {
+    if (!navigationState?.key) return;
+
+    const runId = ++bootstrapRunRef.current;
+    let active = true;
+    const isCurrentRun = () =>
+      active && mountedRef.current && bootstrapRunRef.current === runId;
+
     mountedRef.current = true;
 
     const bootstrap = async () => {
@@ -49,6 +63,8 @@ export default function Boot() {
 
       try {
         const initialUrl = await Linking.getInitialURL().catch(() => null);
+        if (!isCurrentRun()) return;
+
         hasProductDeepLink = Boolean(
           initialUrl && /\/products?\/[^/?#\s]+/i.test(initialUrl)
         );
@@ -84,6 +100,7 @@ export default function Boot() {
         } catch (err) {
           console.log('SecureStore read failed:', err);
         }
+        if (!isCurrentRun()) return;
 
         const isGuest =
           guestModeValue === "true";
@@ -102,8 +119,8 @@ export default function Boot() {
             console.log("👤 Launching in Guest Mode");
           }
 
-          if (segments[0] == null && !hasProductDeepLink) {
-            safeReplace("/(shop)");
+          if (initialRouteSegment == null && !hasProductDeepLink) {
+            safeReplace("/(shop)", runId);
           }
 
           return;
@@ -130,7 +147,7 @@ export default function Boot() {
 
           authClient.setSessionData(null);
 
-          safeReplace("/(auth)/sign-in");
+          safeReplace("/(auth)/sign-in", runId);
           return;
         }
 
@@ -139,6 +156,7 @@ export default function Boot() {
         await SecureStore.deleteItemAsync(
           "guest_mode"
         ).catch(() => {});
+        if (!isCurrentRun()) return;
 
         // ================================================
         // ENTER APP IMMEDIATELY
@@ -147,8 +165,8 @@ export default function Boot() {
         // overriding the initial deep link handling.
         // ================================================
 
-        if (segments[0] == null && !hasProductDeepLink) {
-          safeReplace("/(shop)");
+        if (initialRouteSegment == null && !hasProductDeepLink) {
+          safeReplace("/(shop)", runId);
         }
 
         // ================================================
@@ -194,6 +212,8 @@ export default function Boot() {
             );
           });
       } catch (error) {
+        if (!isCurrentRun()) return;
+
         console.log(
           "Boot initialization failed:",
           error
@@ -221,6 +241,7 @@ export default function Boot() {
               "guest_mode"
             ),
           ]);
+          if (!isCurrentRun()) return;
 
             if (token && cachedUser) {
             authClient.setSessionData({
@@ -228,23 +249,23 @@ export default function Boot() {
               user: JSON.parse(cachedUser),
             });
 
-              if (segments[0] == null && !hasProductDeepLink) {
-                safeReplace("/(shop)");
+              if (initialRouteSegment == null && !hasProductDeepLink) {
+                safeReplace("/(shop)", runId);
               }
             return;
           }
 
           if (guestMode === "true") {
-            safeReplace("/(shop)");
+            safeReplace("/(shop)", runId);
             return;
           }
 
-          safeReplace("/(auth)/sign-in");
+          safeReplace("/(auth)/sign-in", runId);
         } catch {
-          safeReplace("/(auth)/sign-in");
+          safeReplace("/(auth)/sign-in", runId);
         }
       } finally {
-        if (mountedRef.current) {
+        if (isCurrentRun()) {
           setBooting(false);
         }
       }
@@ -253,14 +274,17 @@ export default function Boot() {
     bootstrap();
 
     return () => {
+      active = false;
       mountedRef.current = false;
     };
-  }, []);
+  }, [initialRouteSegment, navigationState?.key, safeReplace]);
 
   // ====================================================
   // SESSION / GUEST WATCHER
   // ====================================================
   useEffect(() => {
+    if (booting) return;
+
     let active = true;
 
     const validateCurrentSession = async () => {
@@ -273,7 +297,6 @@ export default function Boot() {
           'guest_mode'
         );
 
-        const inShop = segments[0] === '(shop)';
         const inAuth = segments[0] === '(auth)';
 
         // ------------------------------------------------
@@ -286,8 +309,8 @@ export default function Boot() {
         // ------------------------------------------------
         // Logged in but somehow inside auth pages
         // ------------------------------------------------
-        if (token && inAuth && active) {
-          router.replace('/(shop)');
+        if (token && inAuth && active && mountedRef.current) {
+          safeReplace('/(shop)');
         }
       } catch (error) {
         console.log(
@@ -302,7 +325,7 @@ export default function Boot() {
     return () => {
       active = false;
     };
-  }, [segments]);
+  }, [booting, safeReplace, segments]);
 
   // ====================================================
   // SPLASH SCREEN
