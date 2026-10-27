@@ -6,7 +6,6 @@ import * as Crypto from 'expo-crypto';
 import { API_URL } from './config';
 
 const DATABASE_NAME = 'ecommerce-offline.db';
-const IMAGE_CACHE_DIR = `${FileSystem.cacheDirectory ?? ''}image-cache/`;
 const FALLBACK_IMAGE = 'https://placehold.co/220?text=No+Image';
 
 let db: SQLite.SQLiteDatabase | null = null;
@@ -1333,15 +1332,21 @@ function safeFileName(url: string): string {
     : sanitized;
 }
 
-async function ensureImageCacheDir(): Promise<void> {
-  if (!FileSystem.cacheDirectory) {
+function getImageCacheDir(): string {
+  const cacheDirectory = FileSystem.cacheDirectory;
+
+  if (!cacheDirectory) {
     throw new Error('FileSystem cache directory is unavailable');
   }
 
-  const info = await FileSystem.getInfoAsync(IMAGE_CACHE_DIR);
+  return `${cacheDirectory}image-cache/`;
+}
+
+async function ensureImageCacheDir(directory: string): Promise<void> {
+  const info = await FileSystem.getInfoAsync(directory);
 
   if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(IMAGE_CACHE_DIR, {
+    await FileSystem.makeDirectoryAsync(directory, {
       intermediates: true,
     });
   }
@@ -1356,9 +1361,10 @@ export async function getCachedImageUri(
   }
 
   try {
-    await ensureImageCacheDir();
+    const imageCacheDir = getImageCacheDir();
+    await ensureImageCacheDir(imageCacheDir);
 
-    const localPath = `${IMAGE_CACHE_DIR}${safeFileName(remoteUrl)}.jpg`;
+    const localPath = `${imageCacheDir}${safeFileName(remoteUrl)}.jpg`;
     const fileInfo = await FileSystem.getInfoAsync(localPath);
 
     if (fileInfo.exists) {
