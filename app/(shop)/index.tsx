@@ -254,80 +254,156 @@ const handlePickImage = useCallback(
   [performVisualSearch]
 );
 
-const safeFetchAndSyncProducts = useCallback(
-  async (limit = 50, page = 1) => {
-    if (catalogSyncInProgressRef.current) {
-      console.log(
-        '⏳ Catalog sync already running, skipping product sync.'
-      );
-      return [];
-    }
+  // ============================================================
+  // SAFE PRODUCT SYNCHRONIZATION
+  // Serializes database synchronization and distinguishes errors
+  // from valid empty product pages.
+  // ============================================================
 
-    catalogSyncInProgressRef.current = true;
+  const safeFetchAndSyncProducts = useCallback(
+    async (limit = 50, page = 1): Promise<any[] | null> => {
+      const task = catalogSyncQueueRef.current.then(async () => {
+        const result = await fetchAndSyncProducts(limit, page);
 
-    try {
-      return await fetchAndSyncProducts(limit, page);
-    } catch (error) {
-      console.warn(
-        '⚠️ Product synchronization failed:',
-        error
-      );
+        if (!Array.isArray(result)) {
+          throw new Error('Product synchronization returned invalid data.');
+        }
 
-      return [];
-    } finally {
-      catalogSyncInProgressRef.current = false;
-    }
-  },
-  []
-);
-
-const loadMoreProducts = useCallback(async () => {
-  if (
-    loadDataInProgressRef.current ||
-    loadMoreInProgressRef.current ||
-    loadingMoreProducts ||
-    !hasMoreProducts
-  ) {
-    return;
-  }
-
-  loadMoreInProgressRef.current = true;
-  setLoadingMoreProducts(true);
-  const nextPage = productPage + 1;
-
-  try {
-    const nextProducts = await safeFetchAndSyncProducts(20, nextPage);
-
-    if (!isMounted.current) return;
-
-    setHasMoreProducts(nextProducts.length === 20);
-    setProductPage(nextPage);
-
-    if (nextProducts.length > 0) {
-      setProducts((currentProducts) => {
-        const existingIds = new Set(currentProducts.map((product) => String(product.id)));
-        return [
-          ...currentProducts,
-          ...nextProducts.filter((product: any) => !existingIds.has(String(product.id))),
-        ];
+        return result;
       });
-      setDisplayLimit((currentLimit) => Math.max(currentLimit, nextPage * 20));
+
+      // Keep the queue alive even when an individual request fails.
+      catalogSyncQueueRef.current = task.then(
+        () => undefined,
+        () => undefined
+      );
+
+      try {
+        return await task;
+      } catch (error) {
+        console.warn(
+          `⚠️ Product synchronization failed (page ${page}):`,
+          error
+        );
+
+        return null;
+      }
+    },
+    []
+  );
+
+  // ============================================================
+  // PAGINATION
+  // ============================================================
+
+  const loadMoreProducts = useCallback(async () => {
+    if (
+      loadDataInProgressRef.current ||
+      loadMoreInProgressRef.current ||
+      loadingMoreProducts ||
+      !hasMoreProducts
+    ) {
+      return;
     }
-  } finally {
-    loadMoreInProgressRef.current = false;
-    if (isMounted.current) setLoadingMoreProducts(false);
-  }
-}, [hasMoreProducts, loadingMoreProducts, productPage, safeFetchAndSyncProducts]);
 
+    loadMoreInProgressRef.current = true;
+    setLoadingMoreProducts(true);
 
-  // 🎯 THE STABLE SECURED ATOMIC SYSTEM LOADER (HOME VIEW)
-  const handleLoadData = useCallback(async (isInitialLoad = false) => {
-    if (loadDataInProgressRef.current || loadMoreInProgressRef.current) return;
-    loadDataInProgressRef.current = true;
-
-    let online = false;
+    const nextPage = productPage + 1;
 
     try {
+      const nextProducts = await safeFetchAndSyncProducts(20, nextPage);
+
+      if (!isMounted.current) return;
+
+      // A failed request must not mark the catalog as exhausted.
+      if (nextProducts === null) {
+        return;
+      }
+
+      if (nextProducts.length === 0) {
+        setHasMoreProducts(false);
+        return;
+      }
+
+      setProducts((currentProducts) => {
+        const existingIds = new Set(
+          currentProducts.map((product) => String(product.id))
+        );
+
+        const uniqueNewProducts = nextProducts.filter(
+          (product: any) =>
+            product?.id != null &&
+            !existingIds.has(String(product.id))
+        );
+
+        return [...currentProducts, ...uniqueNewProducts];
+      });
+
+      setProductPage(nextPage);
+
+      setDisplayLimit((currentLimit) =>
+        Math.max(currentLimit, nextPage * 20)
+      );
+
+      setHasMoreProducts(nextProducts.length === 20);
+    } catch (error) {
+      console.warn('⚠️ Loading more products failed:', error);
+    } finally {
+      loadMoreInProgressRef.current = false;
+
+      if (isMounted.current) {
+        setLoadingMoreProducts(false);
+      }
+
+      // If the user requested a refresh during pagination,
+      // execute it after pagination releases its lock.
+      if (refreshPendingRef.current && isMounted.current) {
+        refreshPendingRef.current = false;
+
+        Promise.resolve().then(() => {
+          void handleLoadDataRef.current?.(false);
+        });
+      }
+    }
+  }, [
+    hasMoreProducts,
+    loadingMoreProducts,
+    productPage,
+    safeFetchAndSyncProducts,
+  ]);
+
+  // ============================================================
+  // HOME DATA LOADER
+  // Loads local data first, then refreshes from remote sources.
+  // ============================================================
+
+  const handleLoadData = useCallback(
+    async (isInitialLoad = false): Promise<void> => {
+      if (!isMounted.current) return;
+
+      // A refresh requested during pagination is queued rather
+      // than silently discarded.
+      if (loadMoreInProgressRef.current) {
+        if (!isInitialLoad) {
+          refreshPendingRef.current = true;
+          setRefreshing(true);
+        }
+
+        return;
+      }
+
+      // Coalesce concurrent refresh requests.
+      if (loadDataInProgressRef.current) {
+        if (!isInitialLoad) {
+          refreshPendingRef.current = true;
+        }
+
+        return;
+      }
+
+      loadDataInProgressRef.current = true;
+
       if (isInitialLoad) {
         setIsLoading(true);
         setInitialCatalogLoadComplete(false);
@@ -335,200 +411,383 @@ const loadMoreProducts = useCallback(async () => {
         setRefreshing(true);
       }
 
-      await initOfflineDb();
+      setRemoteSyncing(false);
 
-      const localCats = await loadCategoriesLocal().catch(() => []);
-      const localProds = await loadProductsLocal(20).catch(() => []);
-
-      let settingsResult = null;
       try {
-        let settingsQuery = await execSql('SELECT * FROM app_settings LIMIT 1;').catch(() => null);
-        if (!settingsQuery || settingsQuery.length === 0) {
-          settingsQuery = await execSql('SELECT * FROM local_settings LIMIT 1;').catch(() => null);
-        }
-        if (settingsQuery && settingsQuery.length > 0) {
-          settingsResult = settingsQuery[0];
-        }
-      } catch (e) {
-        console.warn("⚠️ Settings query dropped layout read pass:", e);
-      }
+        // ------------------------------------------------------
+        // 1. Initialize local database
+        // ------------------------------------------------------
 
-      if (isMounted.current) {
-        if (settingsResult) setSettings(settingsResult);
-        setCategories(localCats || []);
-        setProducts(shuffleArray(localProds || []));
+        await initOfflineDb();
+
+        if (!isMounted.current) return;
+
+        // ------------------------------------------------------
+        // 2. Load cached catalog before attempting the network
+        // ------------------------------------------------------
+
+        let localCats: any[] = [];
+        let localProds: any[] = [];
+
+        try {
+          const result = await loadCategoriesLocal();
+
+          if (Array.isArray(result)) {
+            localCats = result;
+          }
+        } catch (error) {
+          console.warn('⚠️ Local categories could not be loaded:', error);
+        }
+
+        try {
+          const result = await loadProductsLocal(20);
+
+          if (Array.isArray(result)) {
+            localProds = result;
+          }
+        } catch (error) {
+          console.warn('⚠️ Local products could not be loaded:', error);
+        }
+
+        // ------------------------------------------------------
+        // 3. Read settings without blocking the catalog
+        // ------------------------------------------------------
+
+        let settingsResult: any = null;
+
+        try {
+          let settingsQuery = await execSql(
+            'SELECT * FROM app_settings LIMIT 1;'
+          );
+
+          if (!settingsQuery || settingsQuery.length === 0) {
+            settingsQuery = await execSql(
+              'SELECT * FROM local_settings LIMIT 1;'
+            );
+          }
+
+          if (settingsQuery?.length > 0) {
+            settingsResult = settingsQuery[0];
+          }
+        } catch (error) {
+          console.warn('⚠️ Local settings could not be loaded:', error);
+        }
+
+        if (!isMounted.current) return;
+
+        if (settingsResult) {
+          setSettings(settingsResult);
+        }
+
+        setCategories(localCats);
+        setProducts(shuffleArray(localProds));
+
+        setProductPage(1);
+        setDisplayLimit(20);
+        setHasMoreProducts(localProds.length === 20);
+
+        // Cached data can be displayed while remote requests run.
         if (localProds.length > 0) {
           setIsLoading(false);
         }
-      }
 
-      if (isMounted.current) {
-        setRemoteSyncing(true);
-      }
+        // ------------------------------------------------------
+        // 4. Check connectivity
+        // ------------------------------------------------------
 
-      online = await isOnline().catch(() => false);
+        let online = false;
 
-      if (online) {
-        const categoriesRequest = fetchRemoteCategories()
-          .then((remoteCategories) => {
-            if (isMounted.current && remoteCategories.length > 0) {
-              setCategories(remoteCategories);
+        try {
+          online = await isOnline();
+        } catch (error) {
+          console.warn('⚠️ Connectivity check failed:', error);
+        }
+
+        if (!isMounted.current) return;
+
+        // ------------------------------------------------------
+        // 5. Synchronize remote catalog when online
+        // ------------------------------------------------------
+
+        if (online) {
+          setRemoteSyncing(true);
+
+          // Fetch categories concurrently with the first product page.
+          const categoriesRequest = (async () => {
+            try {
+              const remoteCategories = await fetchRemoteCategories();
+
+              if (
+                isMounted.current &&
+                Array.isArray(remoteCategories) &&
+                remoteCategories.length > 0
+              ) {
+                setCategories(remoteCategories);
+              }
+            } catch (error) {
+              console.warn('⚠️ Remote categories could not be loaded:', error);
             }
-          })
-          .catch((error) => {
-            console.warn('⚠️ Category refresh failed:', error);
-          });
+          })();
 
-        const firstProducts = await safeFetchAndSyncProducts(20, 1);
+          try {
+            const firstProducts = await safeFetchAndSyncProducts(20, 1);
 
-        if (isMounted.current) {
-          if (firstProducts.length > 0) {
-            setProducts(shuffleArray(firstProducts));
-            setProductPage(1);
-            setDisplayLimit(20);
-            setHasMoreProducts(firstProducts.length === 20);
-            setIsLoading(false);
+            if (!isMounted.current) return;
+
+            // null means the request failed; preserve the local catalog.
+            if (firstProducts !== null) {
+              if (firstProducts.length > 0) {
+                setProducts(shuffleArray(firstProducts));
+                setProductPage(1);
+                setDisplayLimit(20);
+                setHasMoreProducts(firstProducts.length === 20);
+              } else if (localProds.length === 0) {
+                // A successful empty first page is a real empty result.
+                setProducts([]);
+                setHasMoreProducts(false);
+              }
+            }
+          } finally {
+            await categoriesRequest;
           }
         }
 
-        await categoriesRequest;
-      }
+        // ------------------------------------------------------
+        // 6. Load advertisements independently
+        // ------------------------------------------------------
 
-      if (isMounted.current) {
-        setRemoteSyncing(false);
-      }
+        if (!isMounted.current) return;
 
-      try {
-        const adsRes = await fetch(`${API_URL}/advertisements`);
-        const adsData = await adsRes.json();
-        if (isMounted.current) {
-          setAdvertisements(adsData || []);
+        try {
+          const adsRes = await fetch(`${API_URL}/advertisements`);
+
+          if (!adsRes.ok) {
+            throw new Error(`HTTP ${adsRes.status}`);
+          }
+
+          const adsData = await adsRes.json();
+
+          if (isMounted.current) {
+            setAdvertisements(
+              Array.isArray(adsData) ? adsData : []
+            );
+            setActiveAdIndex(0);
+          }
+        } catch (error) {
+          console.warn('⚠️ Advertisement fetch failed:', error);
+          // Preserve previously loaded advertisements on failure.
         }
-      } catch (adsError) {
-        console.warn("⚠️ Ad fetch failed:", adsError);
+      } catch (error) {
+        console.error('❌ Home data loading failed:', error);
+      } finally {
+        loadDataInProgressRef.current = false;
+
+        if (isMounted.current) {
+          setIsLoading(false);
+          setRefreshing(false);
+          setRemoteSyncing(false);
+
+          if (isInitialLoad) {
+            setInitialCatalogLoadComplete(true);
+          }
+        }
+
+        // Handle a refresh requested while another load was active.
+        if (refreshPendingRef.current && isMounted.current) {
+          refreshPendingRef.current = false;
+
+          Promise.resolve().then(() => {
+            void handleLoadDataRef.current?.(false);
+          });
+        }
       }
-    } catch (err) {
-      console.error('❌ Home Page operational collection thread failed:', err);
-    } finally {
-      loadDataInProgressRef.current = false;
-      if (isMounted.current) {
-        setIsLoading(false);
-        setRefreshing(false);
-        if (isInitialLoad) setInitialCatalogLoadComplete(true);
-      }
-    }
-  }, [safeFetchAndSyncProducts])
-
-  
-  // EXACTLY ONE mount listener is preserved, eliminating concurrent thread resource competition!
-useEffect(() => {
-  isMounted.current = true;
-
-  return () => {
-    isMounted.current = false;
-  };
-}, []);
-
-// HOME TAB ACTIONS
-useEffect(() => {
-  registerHomeActions({
-    scrollToTop: () => {
-      homeListRef.current?.scrollToOffset({
-        offset: 0,
-        animated: true,
-      });
     },
+    [safeFetchAndSyncProducts]
+  );
 
-    refresh: async () => {
-      homeListRef.current?.scrollToOffset({
-        offset: 0,
-        animated: true,
-      });
+  // Keep the latest loader available to pagination and tab actions.
+  handleLoadDataRef.current = handleLoadData;
 
-      await handleLoadData(false);
-    },
-  });
-
-  return () => {
-    registerHomeActions(null);
-  };
-}, [registerHomeActions, handleLoadData]);
-
-
-// INITIAL HOME LOAD — RUN ONCE
-useEffect(() => {
-  void handleLoadData(true);
-}, [handleLoadData]);
-
+  // ============================================================
+  // MOUNT LIFECYCLE
+  // ============================================================
 
   useEffect(() => {
-  if (!advertisements.length) return;
+    isMounted.current = true;
 
-  const interval = setInterval(() => {
-    setActiveAdIndex((prev) => {
-      const nextIndex =
-        prev === advertisements.length - 1 ? 0 : prev + 1;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
-      adsListRef.current?.scrollToIndex({
-        index: nextIndex,
-        animated: true,
-      });
+  // ============================================================
+  // HOME TAB ACTIONS
+  // ============================================================
 
-      return nextIndex;
+  useEffect(() => {
+    registerHomeActions({
+      scrollToTop: () => {
+        homeListRef.current?.scrollToOffset({
+          offset: 0,
+          animated: true,
+        });
+      },
+
+      refresh: async () => {
+        homeListRef.current?.scrollToOffset({
+          offset: 0,
+          animated: true,
+        });
+
+        await handleLoadData(false);
+      },
     });
-  }, 5000); // ⏱ 5 seconds
 
-  return () => clearInterval(interval);
-}, [advertisements]);
+    return () => {
+      registerHomeActions(null);
+    };
+  }, [registerHomeActions, handleLoadData]);
 
+  // ============================================================
+  // INITIAL LOAD
+  // ============================================================
 
-  // 🎯 UNIVERSAL NUMBERS TRANSLATOR METHOD
-  const toLocalNumbers = useCallback((num: string | number) => {
-    const stringValue = String(num || '0');
-    if (locale === 'en' || !locale) return stringValue;
-    
-    const easternDigits = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
-    return stringValue.replace(/[0-9]/g, (w) => easternDigits[parseInt(w, 10)]);
-  }, [locale]);
+  useEffect(() => {
+    void handleLoadData(true);
+  }, [handleLoadData]);
 
-  // 🎯 HIGH-PRECISION HOME PRICE CEILING Markups ENGINE
-  const getPrices = (usdPrice: string, productProfitPercentage?: string | number | null) => {
-    const rate = parseFloat(settings?.usdToAfnRate || '65');
-    const profit = parseFloat(String(productProfitPercentage ?? '20').replace(/[^0-9.]/g, '')) || 20;
-    
-    const baseCurrent = parseFloat(usdPrice || '0') * rate * (1 + profit / 100);
-    const baseOld = parseFloat(usdPrice || '0') * rate * (1 + (profit + 15) / 100);
-    
-    // Forces endings to always be zero via 10-base ceiling arithmetic
-    const currentPriceCalculated = Math.ceil(baseCurrent / 10) * 10;
-    const oldPriceCalculated = Math.ceil(baseOld / 10) * 10;
-    
+  // ============================================================
+  // ADVERTISEMENT AUTOPLAY
+  // ============================================================
+
+  useEffect(() => {
+    if (advertisements.length < 2) return;
+
+    const interval = setInterval(() => {
+      setActiveAdIndex((previousIndex) => {
+        const nextIndex = (previousIndex + 1) % advertisements.length;
+
+        try {
+          adsListRef.current?.scrollToIndex({
+            index: nextIndex,
+            animated: true,
+          });
+        } catch (error) {
+          console.warn('⚠️ Advertisement scrolling failed:', error);
+        }
+
+        return nextIndex;
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [advertisements]);
+
+  // ============================================================
+  // LOCALIZED NUMBER FORMATTING
+  // ============================================================
+
+  const toLocalNumbers = useCallback(
+    (num: string | number) => {
+      const stringValue = String(num ?? '0');
+
+      if (locale === 'en' || !locale) {
+        return stringValue;
+      }
+
+      const easternDigits = [
+        '۰', '۱', '۲', '۳', '۴',
+        '۵', '۶', '۷', '۸', '۹',
+      ];
+
+      return stringValue.replace(/[0-9]/g, (digit) =>
+        easternDigits[Number(digit)]
+      );
+    },
+    [locale]
+  );
+
+  // ============================================================
+  // PRICE CALCULATION
+  // ============================================================
+
+  const getPrices = (
+    usdPrice: string | number | null | undefined,
+    productProfitPercentage?: string | number | null
+  ) => {
+    const parsedRate = Number.parseFloat(
+      String(settings?.usdToAfnRate ?? '65')
+    );
+
+    const rate = Number.isFinite(parsedRate) ? parsedRate : 65;
+
+    const parsedProfit = Number.parseFloat(
+      String(productProfitPercentage ?? '20').replace(/[^0-9.]/g, '')
+    );
+
+    const profit = Number.isFinite(parsedProfit) ? parsedProfit : 20;
+
+    const parsedPrice = Number.parseFloat(String(usdPrice ?? '0'));
+    const price = Number.isFinite(parsedPrice) ? parsedPrice : 0;
+
+    const baseCurrent = price * rate * (1 + profit / 100);
+    const baseOld = price * rate * (1 + (profit + 15) / 100);
+
     return {
-      current: currentPriceCalculated,
-      old: oldPriceCalculated
+      current: Math.ceil(baseCurrent / 10) * 10,
+      old: Math.ceil(baseOld / 10) * 10,
     };
   };
 
-    // 🎯 MULTILINGUAL LOCALE SEARCH INTERCEPTOR
-  // Upgraded to filter safely across both camelCase and snake_case data layers
+  // ============================================================
+  // MULTILINGUAL PRODUCT SEARCH
+  // ============================================================
+
   const filteredProducts = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
-    return products.filter(p => 
-      (p.name || '').toLowerCase().includes(query) ||
-      (p.namePs || '').toLowerCase().includes(query) ||
-      (p.name_ps || '').toLowerCase().includes(query) ||
-      (p.nameFa || '').toLowerCase().includes(query) ||
-      (p.name_fa || '').toLowerCase().includes(query)
-    ).slice(0, displayLimit);
+    const query = searchQuery.trim().toLowerCase();
+
+    return products
+      .filter((product) => {
+        const names = [
+          product?.name,
+          product?.namePs,
+          product?.name_ps,
+          product?.nameFa,
+          product?.name_fa,
+        ];
+
+        return names.some((name) =>
+          String(name ?? '').toLowerCase().includes(query)
+        );
+      })
+      .slice(0, displayLimit);
   }, [products, searchQuery, displayLimit]);
 
+  // ============================================================
+  // ADVERTISEMENT SCROLL POSITION
+  // ============================================================
 
-  const onAdScroll = (event: any) => {
-  const index = Math.round(
-    event.nativeEvent.contentOffset.x / (SCREEN_WIDTH - 32)
+  const onAdScroll = useCallback(
+    (event: any) => {
+      const itemWidth = SCREEN_WIDTH - 32;
+
+      if (itemWidth <= 0 || advertisements.length === 0) return;
+
+      const offsetX = event?.nativeEvent?.contentOffset?.x ?? 0;
+
+      const index = Math.max(
+        0,
+        Math.min(
+          advertisements.length - 1,
+          Math.round(offsetX / itemWidth)
+        )
+      );
+
+      setActiveAdIndex(index);
+    },
+    [advertisements.length]
   );
-  setActiveAdIndex(index);
-};
+
 
 const renderAdvertisements = useCallback(() => {
   if (!advertisements.length) return null;
