@@ -9,6 +9,7 @@ const DATABASE_NAME = 'ecommerce-offline.db';
 const FALLBACK_IMAGE = 'https://placehold.co/220?text=No+Image';
 
 let db: SQLite.SQLiteDatabase | null = null;
+let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let isInitialized = false;
 let initPromise: Promise<void> | null = null;
 
@@ -112,8 +113,21 @@ async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
     return db;
   }
 
-  db = await SQLite.openDatabaseAsync(DATABASE_NAME);
-  return db;
+  if (!dbPromise) {
+    const openingPromise = SQLite.openDatabaseAsync(DATABASE_NAME).then(
+      (database) => {
+        db = database;
+        return database;
+      },
+    );
+
+    dbPromise = openingPromise.catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
+
+  return dbPromise;
 }
 
 async function ensureColumnExists(
@@ -143,7 +157,7 @@ export async function initOfflineDb(): Promise<void> {
     return initPromise;
   }
 
-  initPromise = (async () => {
+  const pendingInit = (async () => {
     const database = await getDatabase();
 
     try {
@@ -249,49 +263,49 @@ export async function initOfflineDb(): Promise<void> {
             createdAt TEXT
           );
         `);
+        // Keep schema checks and migrations in the same exclusive transaction
+        // so overlapping app reloads cannot race to add the same column.
+        const migrations: Array<[string, string, string]> = [
+          ['categories', 'namePs', 'TEXT'],
+          ['categories', 'nameFa', 'TEXT'],
+          ['categories', 'descriptionPs', 'TEXT'],
+          ['categories', 'descriptionFa', 'TEXT'],
+          ['categories', 'usageInstructions', 'TEXT'],
+          ['categories', 'usageInstructionsPs', 'TEXT'],
+          ['categories', 'usageInstructionsFa', 'TEXT'],
+          ['categories', 'imageUrl', 'TEXT'],
+          ['categories', 'parentId', 'TEXT'],
+          ['categories', 'isActive', 'INTEGER DEFAULT 1'],
+
+          ['products', 'categoryId', 'TEXT'],
+          ['products', 'namePs', 'TEXT'],
+          ['products', 'nameFa', 'TEXT'],
+          ['products', 'description', 'TEXT'],
+          ['products', 'descriptionPs', 'TEXT'],
+          ['products', 'descriptionFa', 'TEXT'],
+          ['products', 'usageInstructions', 'TEXT'],
+          ['products', 'usageInstructionsPs', 'TEXT'],
+          ['products', 'usageInstructionsFa', 'TEXT'],
+          ['products', 'usdPrice', 'REAL NOT NULL DEFAULT 0'],
+          ['products', 'profitPercentage', 'REAL DEFAULT 20.0'],
+          ['products', 'imageUrl', 'TEXT'],
+          ['products', 'availableSizes', 'TEXT'],
+          ['products', 'availableColors', 'TEXT'],
+          ['products', 'availableColorsPs', 'TEXT'],
+          ['products', 'availableColorsFa', 'TEXT'],
+          ['products', 'stockQuantity', 'INTEGER DEFAULT 0'],
+          ['products', 'isAvailable', 'INTEGER DEFAULT 1'],
+
+          ['messages', 'attachmentUrl', 'TEXT'],
+          ['messages', 'isRead', 'INTEGER DEFAULT 0'],
+          ['messages', 'isSyncedToServer', 'INTEGER DEFAULT 0'],
+          ['messages', 'createdAt', 'TEXT'],
+        ];
+
+        for (const [table, column, type] of migrations) {
+          await ensureColumnExists(transaction, table, column, type);
+        }
       });
-
-      // Migrate existing installations without deleting existing data.
-      const migrations: Array<[string, string, string]> = [
-        ['categories', 'namePs', 'TEXT'],
-        ['categories', 'nameFa', 'TEXT'],
-        ['categories', 'descriptionPs', 'TEXT'],
-        ['categories', 'descriptionFa', 'TEXT'],
-        ['categories', 'usageInstructions', 'TEXT'],
-        ['categories', 'usageInstructionsPs', 'TEXT'],
-        ['categories', 'usageInstructionsFa', 'TEXT'],
-        ['categories', 'imageUrl', 'TEXT'],
-        ['categories', 'parentId', 'TEXT'],
-        ['categories', 'isActive', 'INTEGER DEFAULT 1'],
-
-        ['products', 'categoryId', 'TEXT'],
-        ['products', 'namePs', 'TEXT'],
-        ['products', 'nameFa', 'TEXT'],
-        ['products', 'description', 'TEXT'],
-        ['products', 'descriptionPs', 'TEXT'],
-        ['products', 'descriptionFa', 'TEXT'],
-        ['products', 'usageInstructions', 'TEXT'],
-        ['products', 'usageInstructionsPs', 'TEXT'],
-        ['products', 'usageInstructionsFa', 'TEXT'],
-        ['products', 'usdPrice', 'REAL NOT NULL DEFAULT 0'],
-        ['products', 'profitPercentage', 'REAL DEFAULT 20.0'],
-        ['products', 'imageUrl', 'TEXT'],
-        ['products', 'availableSizes', 'TEXT'],
-        ['products', 'availableColors', 'TEXT'],
-        ['products', 'availableColorsPs', 'TEXT'],
-        ['products', 'availableColorsFa', 'TEXT'],
-        ['products', 'stockQuantity', 'INTEGER DEFAULT 0'],
-        ['products', 'isAvailable', 'INTEGER DEFAULT 1'],
-
-        ['messages', 'attachmentUrl', 'TEXT'],
-        ['messages', 'isRead', 'INTEGER DEFAULT 0'],
-        ['messages', 'isSyncedToServer', 'INTEGER DEFAULT 0'],
-        ['messages', 'createdAt', 'TEXT'],
-      ];
-
-      for (const [table, column, type] of migrations) {
-        await ensureColumnExists(database, table, column, type);
-      }
 
       isInitialized = true;
       console.log('✅ Offline database initialized');
@@ -300,11 +314,16 @@ export async function initOfflineDb(): Promise<void> {
       throw error;
     }
   })();
+  initPromise = pendingInit;
 
   try {
-    await initPromise;
+    await pendingInit;
   } catch (error) {
-    initPromise = null;
+    if (initPromise === pendingInit) {
+      initPromise = null;
+    }
+
+    isInitialized = false;
     throw error;
   }
 }

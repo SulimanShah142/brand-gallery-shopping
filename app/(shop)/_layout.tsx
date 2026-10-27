@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Platform, Pressable } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +7,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLanguage } from '@/Contexts/LanguageContext';
 import { useCart } from '@/Contexts/CartContext';
 import { useBadges } from '@/Contexts/BadgeContext';
-import { useAuthGuard } from '@/lib/useAuthGuard';
 import { HomeTabProvider, useHomeTab } from '@/Contexts/HomeTabContext';
 import { VisualSearchProvider } from '@/Contexts/VisualSearchContext';
 import { initOfflineDb } from '@/lib/offline';
@@ -26,7 +25,9 @@ export default function ShopLayout() {
 function ShopLayoutContent() {
   const [appIsReady, setAppIsReady] = useState(false);
   const [isBootComplete, setIsBootComplete] = useState(false);
-  const { t, isRTL, locale } = useLanguage();
+  const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const { t, isRTL } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { state: cartState } = useCart();
@@ -36,19 +37,30 @@ function ShopLayoutContent() {
 
   useEffect(() => {
     let mounted = true;
+    let readyTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function prepareShopSystem() {
+      setInitializationError(null);
+
       try {
-        await initOfflineDb().catch(() => {});
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-      } catch (error) {
-        console.warn('Shop app bootstrap skipped an init error:', error);
-      } finally {
+        await initOfflineDb();
+        await new Promise<void>((resolve) => {
+          readyTimer = setTimeout(resolve, 1200);
+        });
+
         if (!mounted) return;
+
         setIsBootComplete(true);
-        setTimeout(() => {
+        readyTimer = setTimeout(() => {
           if (mounted) setAppIsReady(true);
         }, 300);
+      } catch (error) {
+        console.error('Shop database initialization failed:', error);
+        if (mounted) {
+          setInitializationError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
     }
 
@@ -56,8 +68,9 @@ function ShopLayoutContent() {
 
     return () => {
       mounted = false;
+      if (readyTimer) clearTimeout(readyTimer);
     };
-  }, []);
+  }, [retryCount]);
 
   const cartCount = useMemo(() => {
     const items = cartState?.items || [];
@@ -156,6 +169,31 @@ function ShopLayoutContent() {
       </View>
     );
   };
+
+  if (initializationError) {
+    return (
+      <View style={styles.splashContainer}>
+        <Image
+          source={require('@/assets/images/splash.png')}
+          style={styles.splashImage}
+          resizeMode="contain"
+        />
+        <Text style={styles.errorTitle}>OFFLINE DATABASE COULD NOT START</Text>
+        <Text style={styles.errorMessage}>{initializationError}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            setAppIsReady(false);
+            setIsBootComplete(false);
+            setRetryCount((count) => count + 1);
+          }}
+          style={styles.retryButton}
+        >
+          <Text style={styles.retryButtonText}>RETRY</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (!appIsReady || !isBootComplete) {
     return (
@@ -384,6 +422,10 @@ const styles = StyleSheet.create({
   splashImage: { width: '70%', height: '35%' },
   splashFooter: { position: 'absolute', bottom: 60, alignItems: 'center', gap: 12 },
   splashSubtitle: { fontSize: 10, fontWeight: '800', color: '#666666', letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 14 },
+  errorTitle: { marginTop: 24, paddingHorizontal: 24, color: '#111111', fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  errorMessage: { marginTop: 10, paddingHorizontal: 24, color: '#666666', fontSize: 12, textAlign: 'center' },
+  retryButton: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#111111', borderRadius: 8 },
+  retryButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   globalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
   brandCluster: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerLogoImage: { width: 26, height: 26, borderRadius: 6 },

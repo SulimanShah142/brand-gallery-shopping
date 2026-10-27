@@ -1516,4 +1516,3 @@ export async function generateVisualEmbedding(
 
   return normalized;
 }
-

@@ -7,7 +7,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  initOfflineDb, loadCategoriesLocal, loadProductsLocal,
+  loadCategoriesLocal, loadProductsLocal,
   fetchRemoteCategories, isOnline, execSql, fetchAndSyncProducts, shuffleArray,
 } from '@/lib/offline';
 import { useLanguage } from '@/Contexts/LanguageContext';
@@ -43,8 +43,13 @@ export default function HomePage() {
   const [activeAdIndex, setActiveAdIndex] = useState(0);
   const { registerHomeActions } = useHomeTab();
   const catalogSyncInProgressRef = useRef(false);
+  const catalogSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
   const loadDataInProgressRef = useRef(false);
   const loadMoreInProgressRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const handleLoadDataRef = useRef<
+    ((isInitialLoad?: boolean) => Promise<void>) | null
+  >(null);
   const [visualSearchModalVisible, setVisualSearchModalVisible] = useState(false);
   const [visualSearchCategoryModalVisible, setVisualSearchCategoryModalVisible] = useState(false);
   const handleSelectVisualSearchCategory = useCallback((_categoryId: string) => {
@@ -414,17 +419,8 @@ const handlePickImage = useCallback(
       setRemoteSyncing(false);
 
       try {
-        // ------------------------------------------------------
-        // 1. Initialize local database
-        // ------------------------------------------------------
-
-        await initOfflineDb();
-
-        if (!isMounted.current) return;
-
-        // ------------------------------------------------------
-        // 2. Load cached catalog before attempting the network
-        // ------------------------------------------------------
+        // The shop layout initializes SQLite before mounting this screen.
+        // Load cached catalog before attempting the network.
 
         let localCats: any[] = [];
         let localProds: any[] = [];
@@ -450,7 +446,7 @@ const handlePickImage = useCallback(
         }
 
         // ------------------------------------------------------
-        // 3. Read settings without blocking the catalog
+        // Read settings without blocking the catalog
         // ------------------------------------------------------
 
         let settingsResult: any = null;
@@ -492,7 +488,7 @@ const handlePickImage = useCallback(
         }
 
         // ------------------------------------------------------
-        // 4. Check connectivity
+        // Check connectivity
         // ------------------------------------------------------
 
         let online = false;
@@ -506,7 +502,7 @@ const handlePickImage = useCallback(
         if (!isMounted.current) return;
 
         // ------------------------------------------------------
-        // 5. Synchronize remote catalog when online
+        // Synchronize remote catalog when online
         // ------------------------------------------------------
 
         if (online) {
@@ -553,7 +549,7 @@ const handlePickImage = useCallback(
         }
 
         // ------------------------------------------------------
-        // 6. Load advertisements independently
+        // Load advertisements independently
         // ------------------------------------------------------
 
         if (!isMounted.current) return;
