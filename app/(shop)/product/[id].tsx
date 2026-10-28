@@ -1788,16 +1788,16 @@ useEffect(() => {
         >
           <TouchableOpacity
             onPress={() => {
-              if (router.canGoBack()) {
-                router.back();
-                return;
-              }
-
               if (returnCategoryId) {
                 router.replace({
                   pathname: '/categories/[id]',
-                  params: { id: returnCategoryId },
+                  params: { id: String(returnCategoryId) },
                 });
+                return;
+              }
+
+              if (router.canGoBack()) {
+                router.back();
                 return;
               }
 
