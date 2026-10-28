@@ -12,18 +12,14 @@ import { authClient } from '@/lib/auth-client';
 import { AppUpdateBanner } from '@/components/AppUpdateBanner';
 
 function OneSignalBootstrap() {
-  const navigationState = useRootNavigationState();
-
   useEffect(() => {
-    if (!navigationState?.key) return;
-
     let mounted = true;
     let unsubscribe: (() => void) | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const interactionTask = InteractionManager.runAfterInteractions(() => {
       timer = setTimeout(() => {
-        void initOneSignal()
+        void initOneSignal(null, true)
           .then(() => {
             if (!mounted) return;
 
@@ -51,7 +47,7 @@ function OneSignalBootstrap() {
       if (timer) clearTimeout(timer);
       unsubscribe?.();
     };
-  }, [navigationState?.key]);
+  }, []);
 
   return null;
 }

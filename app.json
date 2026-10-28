@@ -2,7 +2,7 @@
   "expo": {
     "name": "Brand Gallery Shopping",
     "slug": "user-app",
-    "version": "1.0.46",
+    "version": "1.0.47",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.jpeg",
     "scheme": "userapp",
