@@ -1,13 +1,11 @@
-import {
-  getAnalytics,
-  logLogin,
-  logPurchase,
-  logSignUp,
-} from '@react-native-firebase/analytics';
+import analytics from '@react-native-firebase/analytics';
 
 export async function trackSignUp(method: string) {
   try {
-    await logSignUp(getAnalytics(), { method });
+    await analytics().logSignUp({
+      method: method,
+    });
+    console.log('🔥 Firebase: Sign Up Tracked');
   } catch (error) {
     console.warn('Firebase Analytics sign_up event failed:', error);
   }
@@ -15,7 +13,10 @@ export async function trackSignUp(method: string) {
 
 export async function trackLogin(method: string) {
   try {
-    await logLogin(getAnalytics(), { method });
+    await analytics().logLogin({
+      method: method,
+    });
+    console.log('🔥 Firebase: Login Tracked');
   } catch (error) {
     console.warn('Firebase Analytics login event failed:', error);
   }
@@ -33,13 +34,19 @@ export async function trackPurchase(
   }[]
 ) {
   try {
-    await logPurchase(getAnalytics(), {
+    await analytics().logPurchase({
       transaction_id: transactionId,
       currency: 'AFN',
-      value,
-      shipping,
-      items,
+      value: value,
+      shipping: shipping,
+      items: items.map(item => ({
+        item_id: item.item_id,
+        item_name: item.item_name,
+        price: item.price,
+        quantity: item.quantity,
+      })),
     });
+    console.log('🔥 Firebase: Purchase Tracked');
   } catch (error) {
     console.warn('Firebase Analytics purchase event failed:', error);
   }
