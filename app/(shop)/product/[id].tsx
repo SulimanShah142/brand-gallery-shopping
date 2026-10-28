@@ -1788,6 +1788,11 @@ useEffect(() => {
         >
           <TouchableOpacity
             onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+                return;
+              }
+
               if (returnCategoryId) {
                 router.replace({
                   pathname: '/categories/[id]',
@@ -1796,7 +1801,7 @@ useEffect(() => {
                 return;
               }
 
-              router.replace('/');
+              router.replace('/(shop)');
             }}
             style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 }}
           >
