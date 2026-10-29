@@ -838,7 +838,12 @@ const totals = useMemo(() => {
           code
         )}&amount=${encodeURIComponent(
           totals.subtotal
-        )}`
+        )}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session?.session?.token || ''}`,
+          },
+        }
       );
 
       const data = await response

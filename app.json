@@ -11,18 +11,33 @@
     "edgeToEdgeEnabled": true,
     "predictiveBackGestureEnabled": false,
     "usesCleartextTraffic": true,
-    "owner": "slliman",
-
+    "owner": "slliman-sarwari",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.slliman.userapp",
       "googleServicesFile": "./GoogleService-Info.plist",
       "associatedDomains": [
+        "applinks:brand-gallery-deep-linking.vercel.app",
         "applinks:brand-gallery-deep-linking.vercel.app"
       ],
-      "buildNumber": "33"
+      "buildNumber": "33",
+      "infoPlist": {
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork"
+          }
+        ]
+      }
     },
-
     "android": {
       "package": "com.slliman.userapp",
       "adaptiveIcon": {
@@ -37,9 +52,33 @@
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.INTERNET"
       ],
       "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "brand-gallery-deep-linking.vercel.app",
+              "pathPrefix": "/product"
+            },
+            {
+              "scheme": "https",
+              "host": "brand-gallery-deep-linking.vercel.app",
+              "pathPrefix": "/products"
+            }
+          ]
+        },
         {
           "action": "VIEW",
           "autoVerify": true,
@@ -62,12 +101,10 @@
         }
       ]
     },
-
     "web": {
       "output": "static",
       "favicon": "./assets/images/app-icon.jpeg"
     },
-
     "plugins": [
       "expo-updates",
       [
@@ -88,7 +125,6 @@
       ],
       "expo-router",
       "@react-native-firebase/app",
-        "@react-native-firebase/analytics",
       [
         "expo-build-properties",
         {
@@ -115,7 +151,6 @@
           }
         }
       ],
-
       [
         "expo-splash-screen",
         {
@@ -136,33 +171,48 @@
         "onesignal-expo-plugin",
         {
           "mode": "production",
-          "smallIcons": ["./assets/ic_stat_onesignal_default.png"],
+          "smallIcons": [
+            "./assets/ic_stat_onesignal_default.png"
+          ],
           "smallIconAccentColor": "#000000"
         }
       ]
     ],
-
     "extra": {
       "oneSignalAppId": "1e89f5fe-bc90-4462-b4ab-f03a3e561c8d",
       "router": {},
       "eas": {
-        "projectId": "a1dc12ab-309d-46eb-9255-d0c09d926b29"
+        "projectId": "2e341b3d-bcfd-4db0-a651-513f4c084752",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "OneSignalNotificationServiceExtension",
+                  "bundleIdentifier": "com.slliman.userapp.OneSignalNotificationServiceExtension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.slliman.userapp.onesignal"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
     },
-
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-
     "runtimeVersion": {
       "policy": "appVersion"
     },
-
     "updates": {
       "enabled": true,
       "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/a1dc12ab-309d-46eb-9255-d0c09d926b29"
+      "url": "https://u.expo.dev/2e341b3d-bcfd-4db0-a651-513f4c084752"
     }
   }
 }
