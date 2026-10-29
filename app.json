@@ -17,7 +17,6 @@
       "bundleIdentifier": "com.slliman.userapp",
       "googleServicesFile": "./GoogleService-Info.plist",
       "associatedDomains": [
-        "applinks:brand-gallery-deep-linking.vercel.app",
         "applinks:brand-gallery-deep-linking.vercel.app"
       ],
       "buildNumber": "33",
@@ -59,26 +58,6 @@
         "android.permission.INTERNET"
       ],
       "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ],
-          "data": [
-            {
-              "scheme": "https",
-              "host": "brand-gallery-deep-linking.vercel.app",
-              "pathPrefix": "/product"
-            },
-            {
-              "scheme": "https",
-              "host": "brand-gallery-deep-linking.vercel.app",
-              "pathPrefix": "/products"
-            }
-          ]
-        },
         {
           "action": "VIEW",
           "autoVerify": true,
