@@ -136,6 +136,9 @@ const [form, setForm] = useState({
     useState<Record<string, any>>({});
 
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
+  const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
+  const [freshCatalogIds, setFreshCatalogIds] = useState<string[]>([]);
 
   // ============================================================
   // LOCALIZED NUMBER FORMATTER
@@ -177,33 +180,46 @@ const [form, setForm] = useState({
     let mounted = true;
 
     const fetchLiveProducts = async () => {
+      if (!cartItems.length) {
+        setFreshCatalogIds([]);
+        setCatalogLoading(false);
+        setCatalogError('');
+        return;
+      }
+
+      setCatalogLoading(true);
+      setCatalogError('');
+      setFreshCatalogIds([]);
       try {
-        const response = await fetch(
-          `${API_URL}/api/products?limit=100`
+        const products = await Promise.all(
+          cartItems.map(async (item: any) => {
+            const response = await fetch(
+              `${API_URL}/api/products/${encodeURIComponent(String(item.id))}`,
+              { cache: 'no-store' }
+            );
+            if (!response.ok) {
+              throw new Error(
+                `Product ${item.id} refresh failed: ${response.status}`
+              );
+            }
+            return response.json();
+          })
         );
 
-        if (!response.ok) {
-          throw new Error(
-            `Product catalog request failed: ${response.status}`
-          );
-        }
-
-        const data = await response.json();
-
-        if (!mounted || !Array.isArray(data)) {
-          return;
-        }
+        if (!mounted) return;
 
         const mapping: Record<string, any> = {};
-
-        for (const product of data) {
+        for (const product of products) {
           if (product?.id) {
             mapping[String(product.id).trim()] = product;
           }
         }
-
-        setHydratedProductsMap(mapping);
+        setHydratedProductsMap((current) => ({ ...current, ...mapping }));
+        setFreshCatalogIds(Object.keys(mapping));
       } catch (error) {
+        if (mounted) {
+          setCatalogError('Could not refresh current product prices.');
+        }
         console.warn(
           '⚠️ Live checkout product hydration failed:',
           error
@@ -220,7 +236,13 @@ const [form, setForm] = useState({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [cartItems, catalogRefreshKey]);
+
+  const catalogReady =
+    cartItems.length > 0 &&
+    cartItems.every((item: any) =>
+      freshCatalogIds.includes(String(item.id).trim())
+    );
 
   // ============================================================
   // CHECKOUT SETTINGS
@@ -232,7 +254,8 @@ const [form, setForm] = useState({
     const fetchCheckoutSettings = async () => {
       try {
         const response = await fetch(
-          `${API_URL}/api/admin/settings`
+          `${API_URL}/api/admin/settings`,
+          { cache: 'no-store' }
         );
 
         if (!response.ok) {
@@ -365,10 +388,53 @@ const totals = useMemo(() => {
 
   const itemPricingBase = cartItems.map(
     (item: any, index: number) => {
-      const price = Math.max(
-        0,
-        Number(item?.price ?? 0)
+      const liveProduct =
+        hydratedProductsMap[String(item?.id ?? '').trim()];
+      const sizeRows = [
+        ...(Array.isArray(liveProduct?.sizeGuide?.rows)
+          ? liveProduct.sizeGuide.rows
+          : []),
+        ...(Array.isArray(liveProduct?.specificationTables)
+          ? liveProduct.specificationTables.flatMap((table: any) =>
+              Array.isArray(table?.rows) ? table.rows : []
+            )
+          : []),
+      ];
+      const selectedSizePrice = sizeRows.find(
+        (row: any) =>
+          String(row?.size ?? '').trim().toLowerCase() ===
+            String(item?.selectedSize ?? '').trim().toLowerCase() &&
+          row?.usdPrice != null &&
+          String(row.usdPrice).trim() !== ''
+      )?.usdPrice;
+      const selectedColorPrice = Array.isArray(liveProduct?.colorVariants)
+        ? liveProduct.colorVariants.find((variant: any) =>
+            [variant?.name, variant?.namePs, variant?.nameFa]
+              .some((name) =>
+                String(name ?? '').trim().toLowerCase() ===
+                String(item?.selectedColor ?? '').trim().toLowerCase()
+              )
+          )?.usdPrice
+        : null;
+      const selectedUsdPrice =
+        selectedSizePrice ??
+        selectedColorPrice ??
+        liveProduct?.usdPrice;
+      const liveRate = Number(
+        settings?.usdToAfnRate ??
+          liveProduct?.settings?.usdToAfnRate ??
+          65
       );
+      const liveProfit = Number(
+        String(liveProduct?.profitPercentage ?? 20).replace(/[^0-9.]/g, '')
+      ) || 20;
+      const calculatedLivePrice = Number(selectedUsdPrice) * liveRate *
+        (1 + liveProfit / 100);
+      const price = liveProduct
+        ? Number.isFinite(calculatedLivePrice)
+          ? Math.max(0, Math.ceil(calculatedLivePrice / 10) * 10)
+          : 0
+        : Math.max(0, Number(item?.price ?? 0));
 
       const quantity = Math.max(
         1,
@@ -381,6 +447,7 @@ const totals = useMemo(() => {
       return {
         index,
         item,
+        liveProduct,
         price,
         quantity,
         lineSubtotal,
@@ -840,6 +907,7 @@ const totals = useMemo(() => {
           totals.subtotal
         )}`,
         {
+          cache: 'no-store',
           headers: {
             Authorization: `Bearer ${session?.session?.token || ''}`,
           },
@@ -961,6 +1029,15 @@ const totals = useMemo(() => {
       return;
     }
 
+    if (!catalogReady) {
+      setCatalogRefreshKey((current) => current + 1);
+      Alert.alert(
+        t('error') || 'Error',
+        catalogError || 'Refreshing current product prices. Please try placing the order again.'
+      );
+      return;
+    }
+
     // ----------------------------------------------------------
     // TOKEN
     // ----------------------------------------------------------
@@ -980,6 +1057,83 @@ const totals = useMemo(() => {
     setLoading(true);
 
     try {
+      const settingsResponse = await fetch(
+        `${API_URL}/api/admin/settings`,
+        { cache: 'no-store' }
+      );
+      if (!settingsResponse.ok) {
+        throw new Error(`Latest settings request failed: ${settingsResponse.status}`);
+      }
+      const latestSettings = await settingsResponse.json();
+      const pricingSettingsKeys = [
+        'usdToAfnRate',
+        'deliveryFee',
+        'freeDeliveryThreshold',
+        'newUserDiscountActive',
+        'newUserDiscountType',
+        'newUserDiscountValue',
+        'newUserMaxPurchaseCount',
+        'newUserDiscountExpiresAt',
+        'rewardThreshold',
+        'rewardType',
+        'rewardValue',
+      ];
+      const settingsChanged = pricingSettingsKeys.some(
+        (key) =>
+          String(latestSettings?.[key] ?? '') !== String(settings?.[key] ?? '')
+      );
+      if (settingsChanged) {
+        setSettings(latestSettings);
+        Alert.alert(
+          t('error') || 'Checkout updated',
+          'Checkout pricing settings changed. Please review the updated total and place the order again.'
+        );
+        return;
+      }
+
+      let orderPromoCode: string | null = null;
+      if (appliedPromo) {
+        const appliedCode = String(
+          appliedPromo.code || promoInput
+        ).trim().toUpperCase();
+        const promoResponse = await fetch(
+          `${API_URL}/api/discounts/validate?code=${encodeURIComponent(
+            appliedCode
+          )}&amount=${encodeURIComponent(totals.subtotal)}`,
+          {
+            cache: 'no-store',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        const currentPromo = await promoResponse.json().catch(() => ({}));
+        if (!promoResponse.ok) {
+          setAppliedPromo(null);
+          Alert.alert(
+            t('error') || 'Error',
+            currentPromo?.error || 'This promo code is no longer available. Apply another code or continue without it.'
+          );
+          return;
+        }
+
+        const promoTermsChanged =
+          String(currentPromo.code || '').toUpperCase() !== appliedCode ||
+          String(currentPromo.type || '').toLowerCase() !==
+            String(appliedPromo.type || '').toLowerCase() ||
+          Number(currentPromo.value) !== Number(appliedPromo.value);
+        if (promoTermsChanged) {
+          setPromoInput(String(currentPromo.code || appliedCode));
+          setAppliedPromo(currentPromo);
+          Alert.alert(
+            t('error') || 'Promo updated',
+            'This promo code changed since it was applied. The latest discount is shown; please review your total and place the order again.'
+          );
+          return;
+        }
+        orderPromoCode = appliedCode;
+      }
+
       // --------------------------------------------------------
       // BUILD EXACT DATABASE ORDER ITEM PAYLOAD
       // --------------------------------------------------------
@@ -1046,15 +1200,7 @@ const payload = {
     totals.fixedRewardDiscount ?? 0
   ),
 
-  promoCode: appliedPromo
-    ? String(
-        promoInput ||
-        appliedPromo.code ||
-        ''
-      )
-        .trim()
-        .toUpperCase()
-    : null,
+  promoCode: orderPromoCode,
 
   totalAmount: Number(
     totals.final
@@ -1594,7 +1740,10 @@ return (
     return str.replace(/[0-9]/g, (w) => easternDigits[parseInt(w, 10)]);
   };
 
-  const itemTotalCalculatedPrice = Math.ceil(parseFloat(item.price || '0') * (item.quantity || 1));
+  const currentUnitPrice = Number(
+    totals.itemPricing[idx]?.price ?? item.price ?? 0
+  );
+  const itemTotalCalculatedPrice = Math.ceil(currentUnitPrice * (item.quantity || 1));
   const colorImages = productRef?.colorImageUrls?.[item.selectedColor] || productRef?.colorImages?.[item.selectedColor];
   const checkoutImageUri = (Array.isArray(colorImages) ? colorImages[0] : colorImages) || item.imageUrl || productRef.imageUrl;
 
@@ -2843,13 +2992,15 @@ return (
         
            <View style={styles.stickyFooter}>
             <TouchableOpacity 
-              style={[styles.orderBtn, loading && { opacity: 0.7 }]} 
+              style={[styles.orderBtn, (loading || catalogLoading || !cartItems.length) && { opacity: 0.7 }]} 
               onPress={handlePlaceOrder} 
-              disabled={loading}
+              disabled={loading || catalogLoading || !cartItems.length}
               activeOpacity={0.9}
             >
-              {loading ? (
+              {loading || catalogLoading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : !catalogReady ? (
+                <Text style={styles.orderBtnText}>RETRY PRICE UPDATE</Text>
               ) : (
                 <Text style={styles.orderBtnText}>
                   {((t('placeOrder') || 'CONFIRM ORDER').toUpperCase())} (AFN {toLocalNumbers(totals.final)})
