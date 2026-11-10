@@ -32,6 +32,7 @@ export function HomeTabProvider({
     scrollToTop: () => void;
     refresh: () => Promise<void>;
   } | null>(null);
+  const lastHomePressAtRef = useRef(0);
 
   const registerHomeActions = useCallback(
     (
@@ -52,10 +53,13 @@ export function HomeTabProvider({
       return;
     }
 
-    // Always return Home to the top.
-    actions.scrollToTop();
+    const now = Date.now();
+    const isSecondPress = now - lastHomePressAtRef.current <= 500;
+    lastHomePressAtRef.current = isSecondPress ? 0 : now;
 
-    // Then refresh its catalog.
+    if (!isSecondPress) return;
+
+    actions.scrollToTop();
     await actions.refresh();
   }, []);
 

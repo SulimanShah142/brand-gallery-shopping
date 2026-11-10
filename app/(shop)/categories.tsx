@@ -43,7 +43,10 @@ export default function CategoriesPage() {
 
 
   // Sidebar Filter Matrix: Extracts top-level categories purely in memory
-  const parentCategories = useMemo(() => categories.filter(cat => !cat.parentId), [categories]);
+  const parentCategories = useMemo(
+    () => categories.filter((cat) => !cat.parentId && cat.isActive !== false && cat.isActive !== 0 && cat.isActive !== '0'),
+    [categories],
+  );
 
     // 🎯 HIGH-PRECISION RE-ENGINEERED MASTER CATEGORY CEILING ENGINE (ZERO-NaN)
   const calculateAfnPriceNum = (usdPrice: string | number | null | undefined, productProfitPercentage?: string | number | null) => {

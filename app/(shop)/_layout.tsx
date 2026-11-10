@@ -3,6 +3,7 @@ import { View, Text, Image, TouchableOpacity, ActivityIndicator, StyleSheet, Pla
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigationState } from '@react-navigation/native';
 
 import { useLanguage } from '@/Contexts/LanguageContext';
 import { useCart } from '@/Contexts/CartContext';
@@ -34,6 +35,9 @@ function ShopLayoutContent() {
   const { userChatBadge } = useBadges();
 
   const { handleHomeTabPress } = useHomeTab();
+  const isHomeTabFocused = useNavigationState(
+    (state) => state.routes[state.index]?.name === 'index',
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -230,7 +234,7 @@ function ShopLayoutContent() {
           name="index"
           listeners={{
             tabPress: () => {
-              void handleHomeTabPress();
+              if (isHomeTabFocused) void handleHomeTabPress();
             },
           }}
           options={{

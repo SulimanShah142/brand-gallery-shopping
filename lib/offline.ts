@@ -459,6 +459,15 @@ export async function saveCategories(categories: any[]): Promise<void> {
           ],
         );
       }
+
+      // The categories endpoint is a full catalog snapshot. Remove stale local
+      // rows so categories deleted by an admin do not remain in the sidebar.
+      const remoteIds = validCategories.map((category) => String(category.id));
+      const placeholders = remoteIds.map(() => '?').join(', ');
+      await database.runAsync(
+        `DELETE FROM categories WHERE id NOT IN (${placeholders});`,
+        remoteIds,
+      );
     });
   });
 }

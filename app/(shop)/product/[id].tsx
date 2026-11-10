@@ -14,6 +14,7 @@ import {
   Dimensions,
   Modal,
   Animated,
+  BackHandler,
 } from "react-native";
 import ImageViewer from "react-native-image-zoom-viewer";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -26,6 +27,7 @@ import * as ImageManipulator from "expo-image-manipulator"; // 🎯 ENSURE THIS 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { authClient } from "@/lib/auth-client";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { API_URL } from "@/lib/config";
 import { useVisualSearch } from "@/Contexts/VisualSearchContext";
 import { generateVisualEmbedding } from "@/lib/visualEmbedding";
@@ -43,6 +45,21 @@ const { id, returnCategoryId } = useLocalSearchParams<{
   returnCategoryId?: string;
 }>();
   const router = useRouter();
+  const navigation = useNavigation();
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        } else {
+          router.replace('/(shop)');
+        }
+        return true;
+      });
+
+      return () => subscription.remove();
+    }, [navigation, router]),
+  );
   const { setResults: setVisualSearchResults } = useVisualSearch();
   const { data: session } = authClient.useSession();
   // 🎯 CORE HOOK CONTEXT BINDINGS
