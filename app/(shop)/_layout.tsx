@@ -220,6 +220,10 @@ function ShopLayoutContent() {
       {renderHeader()}
 
       <Tabs
+        // Hidden detail routes live in this navigator too. Keep the tab
+        // navigator's back stack in visit order so Android back returns from
+        // a detail page to the route that opened it instead of the Home tab.
+        backBehavior="history"
         screenOptions={{
           headerShown: false,
           tabBarStyle: tabBarStyleWithInsets,
