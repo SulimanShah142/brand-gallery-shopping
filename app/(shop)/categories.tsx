@@ -174,11 +174,6 @@ export default function CategoriesPage() {
         }
       }
       
-      // Release visual loading spinners if historical local records are available on screen
-      if (localProds && localProds.length > 0) {
-        setLoading(false);
-      }
-
       // 2. Linear Background Catalog Cloud Sync Ingestion Task Handles
       const online = await isOnline().catch(() => false);
       if (online) {
