@@ -27,7 +27,7 @@ import * as ImageManipulator from "expo-image-manipulator"; // 🎯 ENSURE THIS 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { authClient } from "@/lib/auth-client";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { API_URL } from "@/lib/config";
 import { useVisualSearch } from "@/Contexts/VisualSearchContext";
 import { generateVisualEmbedding } from "@/lib/visualEmbedding";
@@ -43,22 +43,20 @@ export default function UserProductDetails() {
 const { id, returnCategoryId } = useLocalSearchParams<{
   id: string;
   returnCategoryId?: string;
-}>();
+  }>();
   const router = useRouter();
-  const navigation = useNavigation();
   useFocusEffect(
     useCallback(() => {
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (navigation.canGoBack()) {
-          navigation.goBack();
-        } else {
-          router.replace('/(shop)');
-        }
+        // Use Expo Router's root history, matching the in-app back button.
+        // The nearest navigation object belongs to the tab navigator and can
+        // incorrectly report that there is no previous product route.
+        router.back();
         return true;
       });
 
       return () => subscription.remove();
-    }, [navigation, router]),
+    }, [router]),
   );
   const { setResults: setVisualSearchResults } = useVisualSearch();
   const { data: session } = authClient.useSession();
