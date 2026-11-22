@@ -38,6 +38,7 @@ export default function CheckoutScreen() {
   const { clearCart, state } = useCart();
 
   const cartItems = useMemo(() => state?.items || [], [state?.items]);
+  type CheckoutField = 'name' | 'phone' | 'whatsapp' | 'address';
 
   const {
     data: session,
@@ -60,6 +61,26 @@ const [form, setForm] = useState({
   whatsapp: '',
   address: '',
 });
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<CheckoutField, string>>>({});
+  const checkoutScrollRef = useRef<ScrollView>(null);
+  const checkoutSectionY = useRef(0);
+  const checkoutFieldY = useRef<Partial<Record<CheckoutField, number>>>({});
+
+  const scrollToCheckoutField = (field: CheckoutField) => {
+    const fieldY = checkoutSectionY.current + (checkoutFieldY.current[field] ?? 0);
+    checkoutScrollRef.current?.scrollTo({ y: Math.max(0, fieldY - 16), animated: true });
+  };
+
+  const updateFormField = (field: CheckoutField, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
   const [countryCode, setCountryCode] = useState('+93');
   const [countryPickerTarget, setCountryPickerTarget] = useState<'phone' | 'whatsapp' | null>(null);
   const countryCodes = [
@@ -88,7 +109,7 @@ const [form, setForm] = useState({
 
   const updateContactNumber = (field: 'phone' | 'whatsapp', value: string) => {
     const digits = value.replace(/\D/g, '');
-    setForm((current) => ({ ...current, [field]: digits ? `${countryCode}${digits}` : '' }));
+    updateFormField(field, digits ? `${countryCode}${digits}` : '');
   };
 
   const selectCountryCode = (code: string) => {
@@ -986,35 +1007,36 @@ const totals = useMemo(() => {
     // FORM VALIDATION
     // ----------------------------------------------------------
 
-  if (
-  !form.name.trim() ||
-  !form.phone.trim() ||
-  !form.address.trim()
-) {
-  Alert.alert(
-    t('requiredFields') ||
-      'Required Fields',
-    t('fillAllDetails') ||
-      'Please fill in all required information.'
-  );
-
-  return;
-}
-
     const phoneDigits = form.phone.replace(/\D/g, '');
     const whatsappDigits = form.whatsapp.replace(/\D/g, '');
     const isValidInternationalNumber = (value: string) =>
       /^\+?[1-9]\d{7,14}$/.test(value.replace(/[\s()-]/g, ''));
 
-    if (!isValidInternationalNumber(form.phone) || phoneDigits.length < 8 || phoneDigits.length > 15) {
-      Alert.alert(t('invalidPhone') || 'Invalid phone number', 'Enter a valid international phone number with country code.');
+    const errors: Partial<Record<CheckoutField, string>> = {};
+    if (!form.name.trim()) {
+      errors.name = t('requiredName') || 'Please enter your full name.';
+    }
+    if (!form.phone.trim()) {
+      errors.phone = t('requiredPhone') || 'Please enter your phone number.';
+    } else if (!isValidInternationalNumber(form.phone) || phoneDigits.length < 8 || phoneDigits.length > 15) {
+      errors.phone = t('invalidPhone') || 'Enter a valid international phone number with country code.';
+    }
+    if (!form.address.trim()) {
+      errors.address = t('requiredAddress') || 'Please enter your shipping address.';
+    }
+    if (form.whatsapp.trim() && (!isValidInternationalNumber(form.whatsapp) || whatsappDigits.length < 8 || whatsappDigits.length > 15)) {
+      errors.whatsapp = t('invalidWhatsapp') || 'Enter a valid international WhatsApp number with country code.';
+    }
+
+    const firstInvalidField = (['name', 'phone', 'whatsapp', 'address'] as const)
+      .find((field) => errors[field]);
+    if (firstInvalidField) {
+      setFieldErrors(errors);
+      scrollToCheckoutField(firstInvalidField);
       return;
     }
 
-    if (form.whatsapp.trim() && (!isValidInternationalNumber(form.whatsapp) || whatsappDigits.length < 8 || whatsappDigits.length > 15)) {
-      Alert.alert(t('invalidWhatsapp') || 'Invalid WhatsApp number', 'Enter a valid international WhatsApp number with country code.');
-      return;
-    }
+    setFieldErrors({});
 
     // ----------------------------------------------------------
     // CART VALIDATION
@@ -1551,12 +1573,18 @@ return (
 
         {/* 2. ISOLATED SCROLLING FORM ENTRIES */}
         <ScrollView 
+          ref={checkoutScrollRef}
           style={styles.scrollForm} 
           keyboardShouldPersistTaps="handled" 
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent} 
         >
-          <View style={styles.section}>
+          <View
+            style={styles.section}
+            onLayout={({ nativeEvent }) => {
+              checkoutSectionY.current = nativeEvent.layout.y;
+            }}
+          >
             {/* 🎯 CLEAN DESIGN UPDATE: Removed the redundant live GPS trigger button tray entirely */}
         <View style={styles.sectionHeader}>
   <Text style={styles.sectionLabel}>
@@ -1597,25 +1625,37 @@ return (
 </View>
 
 
+<View
+  onLayout={({ nativeEvent }) => {
+    checkoutFieldY.current.name = nativeEvent.layout.y;
+  }}
+>
 <TextInput 
   placeholder={t('fullName') || "FULL NAME"} 
   placeholderTextColor="#BBBBBB" 
   style={[
     styles.input,
+    fieldErrors.name && styles.inputError,
     isRTL && { textAlign: 'right' }
   ]} 
   value={form.name} 
-  onChangeText={(v) =>
-    setForm({
-      ...form,
-      name: v,
-    })
-  } 
+  onChangeText={(v) => updateFormField('name', v)}
   autoCapitalize="words"
 />
+{fieldErrors.name ? <Text style={styles.fieldError}>{fieldErrors.name}</Text> : null}
+</View>
 
 {/* PHONE */}
-<View style={[styles.phoneField, isRTL && { flexDirection: 'row-reverse' }]}>
+<View
+  onLayout={({ nativeEvent }) => {
+    checkoutFieldY.current.phone = nativeEvent.layout.y;
+  }}
+>
+<View style={[
+  styles.phoneField,
+  fieldErrors.phone && styles.phoneFieldError,
+  isRTL && { flexDirection: 'row-reverse' },
+]}>
   <TouchableOpacity
     style={styles.countryCodeButton}
     onPress={() => setCountryPickerTarget('phone')}
@@ -1633,9 +1673,20 @@ return (
     onChangeText={(v) => updateContactNumber('phone', v)}
   />
 </View>
+{fieldErrors.phone ? <Text style={styles.fieldError}>{fieldErrors.phone}</Text> : null}
+</View>
 
 {/* WHATSAPP */}
-<View style={[styles.phoneField, isRTL && { flexDirection: 'row-reverse' }]}>
+<View
+  onLayout={({ nativeEvent }) => {
+    checkoutFieldY.current.whatsapp = nativeEvent.layout.y;
+  }}
+>
+<View style={[
+  styles.phoneField,
+  fieldErrors.whatsapp && styles.phoneFieldError,
+  isRTL && { flexDirection: 'row-reverse' },
+]}>
   <TouchableOpacity
     style={styles.countryCodeButton}
     onPress={() => setCountryPickerTarget('whatsapp')}
@@ -1653,8 +1704,15 @@ return (
     onChangeText={(v) => updateContactNumber('whatsapp', v)}
   />
 </View>
+{fieldErrors.whatsapp ? <Text style={styles.fieldError}>{fieldErrors.whatsapp}</Text> : null}
+</View>
 
 {/* ADDRESS */}
+<View
+  onLayout={({ nativeEvent }) => {
+    checkoutFieldY.current.address = nativeEvent.layout.y;
+  }}
+>
 <TextInput 
   placeholder={
     t('address') ||
@@ -1663,16 +1721,14 @@ return (
   placeholderTextColor="#BBBBBB" 
   style={[
     styles.input,
+    fieldErrors.address && styles.inputError,
     isRTL && { textAlign: 'right' }
   ]} 
   value={form.address} 
-  onChangeText={(v) =>
-    setForm({
-      ...form,
-      address: v,
-    })
-  } 
+  onChangeText={(v) => updateFormField('address', v)}
 />
+{fieldErrors.address ? <Text style={styles.fieldError}>{fieldErrors.address}</Text> : null}
+</View>
 </View>
                    {/* 🎯 MULTILINGUAL CHECKOUT CARGO MANIFEST RENDERING (EXACT MATCH ADJUSTMENT) */}
             <View style={styles.checkoutItemsManifestWrapper}>
@@ -3857,6 +3913,9 @@ sectionLabel: {
  gpsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   gpsBtnText: { fontSize: 9, fontWeight: '700', color: '#000000', letterSpacing: 1 },
   input: { height: 44, borderBottomWidth: 1, borderBottomColor: '#EAEAEA', paddingVertical: 10, marginBottom: 16, fontSize: 13, color: '#000000', letterSpacing: 0.4 },
+  inputError: { borderBottomColor: '#DC2626' },
+  phoneFieldError: { borderBottomColor: '#DC2626' },
+  fieldError: { color: '#DC2626', fontSize: 12, marginTop: -10, marginBottom: 12 },
   phoneField: { height: 48, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#EAEAEA', marginBottom: 16 },
   countryCodeButton: { minWidth: 76, height: 36, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRightWidth: 1, borderRightColor: '#E5E5E5' },
   countryCodeText: { fontSize: 13, fontWeight: '800', color: '#111111' },
