@@ -499,6 +499,12 @@ useEffect(() => {
       'cancelled_by_user',
       'cancelled_by_packager',
       'cancelled_by_deliverer',
+      'awaiting_packaging',
+      'packaging',
+      'packaged',
+      'assigned_to_deliverer',
+      'picked_up',
+      'out_for_delivery',
       'refund_approved',
       'refund_pickup_in_progress',
     ].includes(status);

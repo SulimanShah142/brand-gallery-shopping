@@ -38,6 +38,7 @@ export default function ChatScreen() {
 // 🎯 CHAT FRAMEWORK CORE STATE HOOKS LAYER
 const [messages, setMessages] = useState<any[]>([]);          // Chronological message stream log
 const [inputText, setInputText] = useState('');              // Live text container tracking inputs
+const [peerPresence, setPeerPresence] = useState<any>(null);
 const [loading, setLoading] = useState(true);                // Thread loading initialization tracker
 const [sending, setSending] = useState(false);              // Binary blocker for the media upload loop
 
@@ -53,6 +54,8 @@ const [cachedUser, setCachedUser] = useState<any>(null);      // Local profile m
 
   const flatListRef = useRef<FlatList>(null);
   const orderContextSentRef = useRef<string | null>(null);
+  const inputTextRef = useRef(inputText);
+  inputTextRef.current = inputText;
 
   const orderIdParam = Array.isArray(params.orderId) ? params.orderId[0] : params.orderId;
   const orderItemNameParam = Array.isArray(params.orderItemName) ? params.orderItemName[0] : params.orderItemName;
@@ -304,6 +307,62 @@ useEffect(() => {
     clearInterval(interval);
   };
 }, [activeConvId, refreshFromServer]);
+
+useEffect(() => {
+  if (!activeConvId || !activeUserId || activeUserId === 'offline-user') {
+    setPeerPresence(null);
+    return;
+  }
+
+  let active = true;
+  let requestInFlight = false;
+  const updatePresence = async (online = true) => {
+    if (requestInFlight || (online && AppState.currentState !== 'active')) return;
+    requestInFlight = true;
+    try {
+      const updateResponse = await fetch(
+        `${API_URL}/api/conversations/${activeConvId}/presence`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            senderId: activeUserId,
+            online,
+            isTyping: online && inputTextRef.current.trim().length > 0,
+          }),
+        }
+      );
+      if (!updateResponse.ok) {
+        throw new Error(`Presence update failed with status ${updateResponse.status}`);
+      }
+
+      if (!online || !active) return;
+      const presence = await updateResponse.json();
+      if (active) setPeerPresence(presence?.admin || null);
+    } catch (error) {
+      console.warn('Could not synchronize admin chat presence:', error);
+    } finally {
+      requestInFlight = false;
+    }
+  };
+
+  void updatePresence();
+  const interval = setInterval(() => void updatePresence(), 5000);
+  const appStateSubscription = AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      void updatePresence();
+    } else {
+      void updatePresence(false);
+    }
+  });
+
+  return () => {
+    active = false;
+    clearInterval(interval);
+    appStateSubscription.remove();
+    void updatePresence(false);
+  };
+}, [activeConvId, activeUserId]);
    // 🎯 THE COMPLIANT DISPATCH CONTEXT LAYER
   // ==========================================
   // 🎯 THE DISAPPEARING MESSAGE CURE (SYNCHRONIZED DISPATCH)
@@ -605,6 +664,19 @@ const handlePickAndUploadImage = async () => {
           <Text style={styles.headerSubtitle}>
             {t('onlineAssistanceChannel') || 'ONLINE ASSISTANCE CHANNEL'}
           </Text>
+          <Text style={[
+            styles.presenceText,
+            peerPresence?.isOnline && styles.presenceOnline,
+            peerPresence?.isTyping && styles.presenceTyping,
+          ]}>
+            {peerPresence?.isTyping
+              ? 'ADMIN IS TYPING…'
+              : peerPresence?.isOnline
+                ? 'ADMIN ONLINE'
+                : peerPresence?.lastSeenAt
+                  ? `LAST SEEN ${new Date(peerPresence.lastSeenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : 'ADMIN OFFLINE'}
+          </Text>
         </View>
         <View style={styles.headerActionSlot} />
       </View>
@@ -651,6 +723,12 @@ const handlePickAndUploadImage = async () => {
             </Text>
           </View>
         ) : (
+          <>
+          {peerPresence?.isTyping && (
+            <View style={styles.typingIndicator}>
+              <Text style={styles.typingIndicatorText}>Admin is typing…</Text>
+            </View>
+          )}
           <FlatList
             ref={flatListRef}
             data={messages}
@@ -661,6 +739,7 @@ const handlePickAndUploadImage = async () => {
             keyboardShouldPersistTaps="handled"
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           />
+          </>
         )}
 
         {/* PREVIEW ATTACHMENT MINI BAR SLAT */}
@@ -795,6 +874,28 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     alignItems: 'center'
+  },
+  presenceText: {
+    marginTop: 4,
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  presenceOnline: {
+    color: '#16A34A',
+  },
+  presenceTyping: {
+    color: '#2563EB',
+  },
+  typingIndicator: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+  typingIndicatorText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontStyle: 'italic',
   },
 
   // MEDIA PICKER PREVIEW HUD PANEL MANIFEST SLATS
